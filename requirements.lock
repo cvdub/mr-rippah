@@ -37,6 +37,8 @@ pyogg==0.6.14a1
 requests==2.32.3
     # via librespot
     # via mr-rippah
+tqdm==4.67.1
+    # via mr-rippah
 urllib3==2.3.0
     # via requests
 websocket-client==1.8.0

@@ -1,4 +1,5 @@
 import concurrent.futures
+import logging
 import time
 from io import BytesIO
 from pathlib import Path
@@ -12,10 +13,7 @@ from mutagen.easyid3 import EasyID3
 from mutagen.id3 import APIC, ID3, TXXX
 from platformdirs import user_cache_dir, user_downloads_dir
 from pydub import AudioSegment
-
-# logging.basicConfig(level=logging.INFO)
-# logger = logging.getLogger(__name__)
-# logger.setLevel(logging.INFO)
+from tqdm import tqdm
 
 DEVICE_NAME = "Mr. Rippah"
 CACHE_DIRECTORY = Path(user_cache_dir("Mr. Rippah", ensure_exists=True))
@@ -30,29 +28,60 @@ MAX_RETRIES = 5
 
 
 class MrRippah:
-    def __init__(self):
+    def __init__(self, log_level=logging.INFO, parallel: bool = False):
+        self.parallel = parallel
+
+        # Configure logger
+        self.log_level = log_level
+        self.logger = logging.getLogger(f"mr_rippah_{id(self)}")
+        self.logger.setLevel(log_level)
+        handler = logging.StreamHandler()
+        handler.setLevel(log_level)
+        if log_level == logging.DEBUG:
+            log_format = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+        else:
+            log_format = "%(message)s"
+
+        formatter = logging.Formatter(log_format)
+        handler.setFormatter(formatter)
+        self.logger.addHandler(handler)
+
         if not CREDENTIALS_FILE.exists():
+            self.logger.info("No cached credentials")
             self.get_credentials()
 
-        print("Starting librespot session")
+        self.logger.debug("Starting librespot session")
+        ConnectionRefusedError
         librespot_config = Session.Configuration.Builder().set_stored_credential_file(
             CREDENTIALS_FILE
         )
-        self.librespot_session = (
-            Session.Builder(librespot_config).stored_file().create()
-        )
+        num_retries = 0
+        while num_retries < MAX_RETRIES:
+            try:
+                self.librespot_session = (
+                    Session.Builder(librespot_config).stored_file().create()
+                )
+            except ConnectionRefusedError as e:
+                self.logger.debug(f"Failed to get librespot session: {e}")
+                num_retries += 1
+                if num_retries < MAX_RETRIES:
+                    self.logger.debug(
+                        f"Retry attempt {num_retries} for librespot session"
+                    )
+            else:
+                break
 
     def get_credentials(self) -> None:
         zeroconf_builder = ZeroconfServer.Builder()
         zeroconf_builder.set_device_name(DEVICE_NAME)
         zeroconf_builder.conf.stored_credentials_file = CREDENTIALS_FILE
         zeroconf = zeroconf_builder.create()
-        print("Started Zeroconf server")
-        print(f"Select {DEVICE_NAME} in Spotify client to authenticate")
+        self.logger.debug("Started Zeroconf server")
+        self.logger.info(f"Select {DEVICE_NAME} in Spotify client to authenticate")
         while True:
             time.sleep(1)
             if zeroconf.has_valid_session():
-                print("Got Spotify credentials!")
+                self.logger.info("Got Spotify credentials!")
                 zeroconf.close_session()
                 zeroconf.close()
                 while not CREDENTIALS_FILE.exists():
@@ -74,8 +103,8 @@ class MrRippah:
         track_id = track_uri.lstrip("spotify:track:")
         return self.spotify_api_request(f"tracks/{track_id}?market={SPOTIFY_MARKET}")
 
-    def rip_playlist(self, playlist_uri: str, parallel: bool = True) -> None:
-        print(f"Ripping {playlist_uri}")
+    def rip_playlist(self, playlist_uri: str) -> None:
+        self.logger.info(f"Ripping {playlist_uri}")
         track_ids = []
         playlist_id = playlist_uri.lstrip("spotify:playlist:")
         playlist_items = self.spotify_api_request(
@@ -91,26 +120,33 @@ class MrRippah:
             else:
                 break
 
-        if parallel:
-            with concurrent.futures.ProcessPoolExecutor(
-                max_workers=MAX_WORKERS
-            ) as executor:
-                executor.map(MrRippah._rip_track, track_ids)
-        else:
-            for track_id in track_ids:
-                self.rip_track(track_id)
+        with tqdm(
+            desc="Tracks ripped",
+            total=len(track_ids),
+            disable=self.log_level not in (logging.DEBUG, logging.INFO),
+        ) as progress_bar:
+            if self.parallel:
+                with concurrent.futures.ProcessPoolExecutor(
+                    max_workers=MAX_WORKERS
+                ) as executor:
+                    for _ in executor.map(MrRippah._rip_track, track_ids):
+                        progress_bar.update(1)
+            else:
+                for track_id in track_ids:
+                    self.rip_track(track_id)
+                    progress_bar.update(1)
 
     def rip_track(self, track_uri: str) -> None:
-        print(f"Ripping {track_uri}")
+        self.logger.debug(f"{track_uri} Ripping track")
 
-        print("-> Getting track metadata")
+        self.logger.debug(f"{track_uri} Getting track metadata")
         metadata = self.get_track_metadata(track_uri)
 
         if metadata["is_playable"] is False:
-            print("-> SKIPPING! Track not playable")
+            self.logger.debug(f"{track_uri} SKIPPING! Track not playable")
             return
 
-        print("-> Saving track stream")
+        self.logger.debug(f"{track_uri} Saving track stream")
         track_stream = self.librespot_session.content_feeder().load(
             TrackId.from_base62(track_uri.lstrip("spotify:track:")),
             VorbisOnlyAudioQuality(AudioQuality.VERY_HIGH),
@@ -126,7 +162,7 @@ class MrRippah:
 
             audio_bytes.write(chunk)
 
-        print("-> Converting track to MP3")
+        self.logger.debug(f"{track_uri} Converting track to MP3")
         audio_bytes.seek(0)
         audio = AudioSegment.from_file(audio_bytes, format="ogg")
         track_path = (
@@ -142,7 +178,7 @@ class MrRippah:
             parameters=["-q:a", "0"],
         )
 
-        print("-> Setting track metadata")
+        self.logger.debug(f"{track_uri} Setting track metadata")
         audio = EasyID3(track_path)
         audio["title"] = metadata["name"]
         audio["artist"] = metadata["artists"][0]["name"]
@@ -175,13 +211,13 @@ class MrRippah:
     def _rip_track(cls, track_uri):
         num_retries = 0
         while num_retries < MAX_RETRIES:
-            if num_retries:
-                print(f"Retry attempt {num_retries} for {track_uri}")
             mr = cls()
+            if num_retries:
+                mr.logger.debug(f"Retry attempt {num_retries} for {track_uri}")
             try:
                 mr.rip_track(track_uri)
             except Exception as e:
-                print(f"Failed to rip {track_uri}: {e}")
+                mr.logger.debug(f"Failed to rip {track_uri}: {e}")
                 num_retries += 1
             else:
                 break

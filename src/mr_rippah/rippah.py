@@ -1,3 +1,4 @@
+import concurrent.futures
 import time
 from io import BytesIO
 from pathlib import Path
@@ -24,6 +25,8 @@ DOWNLOADS_DIRECTORY = Path(user_downloads_dir())
 TRACK_DOWNLOAD_RETRIES = 30
 SPOTIFY_MARKET = "US"
 SPOTIFY_API_URL = "https://api.spotify.com/v1/"
+MAX_WORKERS = 5
+MAX_RETRIES = 5
 
 
 class MrRippah:
@@ -71,7 +74,7 @@ class MrRippah:
         track_id = track_uri.lstrip("spotify:track:")
         return self.spotify_api_request(f"tracks/{track_id}?market={SPOTIFY_MARKET}")
 
-    def rip_playlist(self, playlist_uri: str) -> None:
+    def rip_playlist(self, playlist_uri: str, parallel: bool = True) -> None:
         print(f"Ripping {playlist_uri}")
         track_ids = []
         playlist_id = playlist_uri.lstrip("spotify:playlist:")
@@ -81,15 +84,21 @@ class MrRippah:
         while True:
             for item in playlist_items["items"]:
                 if track_id := item["track"]["id"]:
-                    track_ids.append(item["track"]["id"])
+                    track_ids.append(track_id)
 
             if playlist_items["next"]:
                 playlist_items = self.spotify_api_request(playlist_items["next"])
             else:
                 break
 
-        for track_id in track_ids:
-            self.rip_track(track_id)
+        if parallel:
+            with concurrent.futures.ProcessPoolExecutor(
+                max_workers=MAX_WORKERS
+            ) as executor:
+                executor.map(MrRippah._rip_track, track_ids)
+        else:
+            for track_id in track_ids:
+                self.rip_track(track_id)
 
     def rip_track(self, track_uri: str) -> None:
         print(f"Ripping {track_uri}")
@@ -108,6 +117,7 @@ class MrRippah:
             True,  # Pre-load
             None,
         )
+
         audio_bytes = BytesIO()
         while True:
             chunk = track_stream.input_stream.stream().read(CHUNK_SIZE)
@@ -160,3 +170,18 @@ class MrRippah:
             )
 
         audio.save()
+
+    @classmethod
+    def _rip_track(cls, track_uri):
+        num_retries = 0
+        while num_retries < MAX_RETRIES:
+            if num_retries:
+                print(f"Retry attempt {num_retries} for {track_uri}")
+            mr = cls()
+            try:
+                mr.rip_track(track_uri)
+            except Exception as e:
+                print(f"Failed to rip {track_uri}: {e}")
+                num_retries += 1
+            else:
+                break

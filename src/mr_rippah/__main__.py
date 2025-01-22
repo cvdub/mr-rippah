@@ -25,7 +25,7 @@ def main():
         "-p",
         "--parallel",
         action="store_true",
-        help="enable parallel processing (default: False)",
+        help="enable parallel processing",
     )
 
     args = parser.parse_args()

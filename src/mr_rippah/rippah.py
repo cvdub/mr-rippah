@@ -97,7 +97,12 @@ class MrRippah:
             endpoint,
             headers={"Authorization": f"Bearer {token}"},
         )
-        return response.json()
+        response.raise_for_status()            
+        try:
+            return response.json()
+        except requests.exceptions.JSONDecodeError as e:
+            self.logger.error(f"Failed to decode JSON response: {response.text}")
+            raise
 
     def get_track_metadata(self, track_uri: str) -> dict:
         track_id = track_uri.lstrip("spotify:track:")

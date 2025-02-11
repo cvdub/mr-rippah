@@ -109,9 +109,14 @@ class MrRippah:
         return self.spotify_api_request(f"tracks/{track_id}?market={SPOTIFY_MARKET}")
 
     def rip_playlist(self, playlist_uri: str) -> None:
+        if playlist_uri.startswith("https://open.spotify.com/playlist/"):
+            playlist_id = playlist_uri.split("/playlist/")[1].split("?")[0]
+            playlist_id = playlist_id.strip('\\').strip('/')
+        elif playlist_uri.startswith("spotify:playlist:"):
+            playlist_id = playlist_uri.lstrip("spotify:playlist:")
+
         self.logger.info(f"Ripping {playlist_uri}")
         track_ids = []
-        playlist_id = playlist_uri.lstrip("spotify:playlist:")
         playlist_items = self.spotify_api_request(
             f"playlists/{playlist_id}/tracks?fields=next,items(track(id))"
         )

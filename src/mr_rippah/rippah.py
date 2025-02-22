@@ -10,7 +10,7 @@ from librespot.core import Session
 from librespot.metadata import TrackId
 from librespot.zeroconf import ZeroconfServer
 from mutagen.easyid3 import EasyID3
-from mutagen.id3 import APIC, ID3, TXXX
+from mutagen.id3 import APIC, ID3, TXXX, COMM
 from platformdirs import user_cache_dir, user_downloads_dir
 from pydub import AudioSegment
 from tqdm import tqdm
@@ -201,6 +201,7 @@ class MrRippah:
 
         audio = ID3(track_path)
         audio.add(TXXX(desc="spotify_uris", text=list(track_uri)))
+        audio.add(COMM(text=f'spotify:track:{track_uri}'))
 
         album_art_url = metadata["album"]["images"][0]["url"]
         response = requests.get(album_art_url)

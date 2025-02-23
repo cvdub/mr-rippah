@@ -10,7 +10,7 @@ from librespot.core import Session
 from librespot.metadata import TrackId
 from librespot.zeroconf import ZeroconfServer
 from mutagen.easyid3 import EasyID3
-from mutagen.id3 import APIC, ID3, TXXX
+from mutagen.id3 import APIC, ID3, TXXX, COMM
 from platformdirs import user_cache_dir, user_downloads_dir
 from pydub import AudioSegment
 from tqdm import tqdm
@@ -97,16 +97,26 @@ class MrRippah:
             endpoint,
             headers={"Authorization": f"Bearer {token}"},
         )
-        return response.json()
+        response.raise_for_status()            
+        try:
+            return response.json()
+        except requests.exceptions.JSONDecodeError as e:
+            self.logger.error(f"Failed to decode JSON response: {response.text}")
+            raise
 
     def get_track_metadata(self, track_uri: str) -> dict:
         track_id = track_uri.lstrip("spotify:track:")
         return self.spotify_api_request(f"tracks/{track_id}?market={SPOTIFY_MARKET}")
 
     def rip_playlist(self, playlist_uri: str) -> None:
+        if playlist_uri.startswith("https://open.spotify.com/playlist/"):
+            playlist_id = playlist_uri.split("/playlist/")[1].split("?")[0]
+            playlist_id = playlist_id.strip('\\').strip('/')
+        elif playlist_uri.startswith("spotify:playlist:"):
+            playlist_id = playlist_uri.lstrip("spotify:playlist:")
+
         self.logger.info(f"Ripping {playlist_uri}")
         track_ids = []
-        playlist_id = playlist_uri.lstrip("spotify:playlist:")
         playlist_items = self.spotify_api_request(
             f"playlists/{playlist_id}/tracks?fields=next,items(track(id))"
         )
@@ -133,7 +143,7 @@ class MrRippah:
                         progress_bar.update(1)
             else:
                 for track_id in track_ids:
-                    self.rip_track(track_id)
+                    self._rip_track(track_id)
                     progress_bar.update(1)
 
     def rip_track(self, track_uri: str) -> None:
@@ -191,6 +201,7 @@ class MrRippah:
 
         audio = ID3(track_path)
         audio.add(TXXX(desc="spotify_uris", text=list(track_uri)))
+        audio.add(COMM(text=f'spotify:track:{track_uri}'))
 
         album_art_url = metadata["album"]["images"][0]["url"]
         response = requests.get(album_art_url)

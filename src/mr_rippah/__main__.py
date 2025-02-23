@@ -9,7 +9,7 @@ def main():
     parser = argparse.ArgumentParser(description="Mr. Rippah")
     parser.add_argument(
         "uri",
-        help="spotify playlist URI",
+        help="spotify track or playlist URI",
     )
     verbosity_group = parser.add_mutually_exclusive_group()
     verbosity_group.add_argument(
@@ -27,6 +27,12 @@ def main():
         action="store_true",
         help="enable parallel processing",
     )
+    parser.add_argument(
+        "-t",
+        "--track",
+        action="store_true",
+        help="rip a single track",
+    )
 
     args = parser.parse_args()
 
@@ -41,9 +47,12 @@ def main():
         log_level = logging.INFO
 
     mr = MrRippah(log_level=log_level, parallel=args.parallel)
-    mr.rip_playlist(args.uri)
+    if args.track:
+        mr.rip_track(args.uri)
+    else:
+        mr.rip_playlist(args.uri)
     end_time = time.perf_counter()
-    mr.logger.info(f"Ripped playlist in {end_time - start_time:,.2f} seconds")
+    mr.logger.info(f"Ripped {'track' if args.track else 'playlist'} in {end_time - start_time:,.2f} seconds")
 
 
 if __name__ == "__main__":

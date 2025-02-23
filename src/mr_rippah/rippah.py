@@ -143,7 +143,7 @@ class MrRippah:
                         progress_bar.update(1)
             else:
                 for track_id in track_ids:
-                    self.rip_track(track_id)
+                    self._rip_track(track_id)
                     progress_bar.update(1)
 
     def rip_track(self, track_uri: str) -> None:

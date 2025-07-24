@@ -35,6 +35,21 @@ def is_spotify_playlist_uri(playlist_uri: str) -> bool:
     return bool(SPOTIFY_PLAYLIST_REGEX.match(playlist_uri))
 
 
+def make_unique_directory(path: Path):
+    if not path.exists():
+        path.mkdir()
+        return path
+
+    # otherwise append a number
+    i = 1
+    while True:
+        candidate = path.with_name(f"{path.name} ({i})")
+        if not candidate.exists():
+            candidate.mkdir()
+            return candidate
+        i += 1
+
+
 class MrRippah:
     def __init__(self, log_level=logging.INFO):
         # Configure logger
@@ -122,11 +137,17 @@ class MrRippah:
         if not is_spotify_playlist_uri(playlist_uri):
             raise ValueError(f"Invalid Spotify playlist URI: {playlist_uri}")
 
+        download_directory = make_unique_directory(DOWNLOADS_DIRECTORY / playlist_uri)
+        self.logger.info(f"Ripping {playlist_uri} to {download_directory}")
+
         track_ids = []
         playlist_id = playlist_uri.lstrip("spotify:playlist:")
         playlist_items = self.spotify_api_request(
             f"playlists/{playlist_id}/tracks?fields=next,items(track(id))"
         )
+        if "error" in playlist_items:
+            raise ValueError(str(playlist_items["error"]["message"]))
+
         while True:
             for item in playlist_items["items"]:
                 if track_id := item["track"]["id"]:
@@ -143,14 +164,14 @@ class MrRippah:
             disable=self.log_level not in (logging.DEBUG, logging.INFO),
         ) as progress_bar:
             for track_id in track_ids:
-                self.rip_track(track_id)
+                self.rip_track(track_id, download_directory)
                 progress_bar.update(1)
                 self.logger.debug(
                     f"Waiting {SUCCESSFUL_DOWNLOAD_DELAY_SECONDS} seconds to start next download"
                 )
                 time.sleep(SUCCESSFUL_DOWNLOAD_DELAY_SECONDS)
 
-    def rip_track(self, track_uri: str) -> None:
+    def rip_track(self, track_uri: str, download_directory: Path) -> None:
         self.logger.debug(f"{track_uri} Ripping track")
 
         self.logger.debug(f"{track_uri} Getting track metadata")
@@ -196,7 +217,7 @@ class MrRippah:
         audio_bytes.seek(0)
         audio = AudioSegment.from_file(audio_bytes, format="ogg")
         track_path = (
-            DOWNLOADS_DIRECTORY
+            download_directory
             / metadata["album"]["artists"][0]["name"]
             / metadata["album"]["name"]
             / f"{metadata['track_number']:02} - {metadata['name']}.mp3"

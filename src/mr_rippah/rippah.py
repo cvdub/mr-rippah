@@ -137,7 +137,9 @@ class MrRippah:
         if not is_spotify_playlist_uri(playlist_uri):
             raise ValueError(f"Invalid Spotify playlist URI: {playlist_uri}")
 
-        download_directory = make_unique_directory(DOWNLOADS_DIRECTORY / playlist_uri)
+        download_directory = make_unique_directory(
+            DOWNLOADS_DIRECTORY / playlist_uri.split(":")[-1]
+        )
         self.logger.info(f"Ripping {playlist_uri} to {download_directory}")
 
         track_ids = []

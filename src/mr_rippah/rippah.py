@@ -1,11 +1,7 @@
-import warnings
-
-# Ignore SyntaxWarning specifically
-warnings.filterwarnings("ignore", category=SyntaxWarning)
-
 import logging
 import re
 import time
+import warnings
 from io import BytesIO
 from pathlib import Path
 
@@ -17,8 +13,10 @@ from librespot.zeroconf import ZeroconfServer
 from mutagen.easyid3 import EasyID3
 from mutagen.id3 import APIC, ID3, TXXX
 from platformdirs import user_cache_dir, user_downloads_dir
-from pydub import AudioSegment
 from tqdm import tqdm
+
+with warnings.catch_warnings(action="ignore", category=SyntaxWarning):
+    from pydub import AudioSegment
 
 DEVICE_NAME = "Mr. Rippah"
 CACHE_DIRECTORY = Path(user_cache_dir("Mr. Rippah", ensure_exists=True))

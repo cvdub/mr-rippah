@@ -21,12 +21,6 @@ def main():
         action="store_true",
         help="suppress logging output",
     )
-    parser.add_argument(
-        "-p",
-        "--parallel",
-        action="store_true",
-        help="enable parallel processing",
-    )
 
     args = parser.parse_args()
 
@@ -40,7 +34,7 @@ def main():
     else:
         log_level = logging.INFO
 
-    mr = MrRippah(log_level=log_level, parallel=args.parallel)
+    mr = MrRippah(log_level=log_level)
     mr.rip_playlist(args.uri)
     end_time = time.perf_counter()
     mr.logger.info(f"Ripped playlist in {end_time - start_time:,.2f} seconds")

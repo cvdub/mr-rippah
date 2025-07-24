@@ -1,4 +1,3 @@
-import concurrent.futures
 import logging
 import time
 from io import BytesIO
@@ -30,9 +29,7 @@ SUCCESSFUL_DOWNLOAD_DELAY_SECONDS = 5
 
 
 class MrRippah:
-    def __init__(self, log_level=logging.INFO, parallel: bool = False):
-        self.parallel = parallel
-
+    def __init__(self, log_level=logging.INFO):
         # Configure logger
         self.log_level = log_level
         self.logger = logging.getLogger(f"mr_rippah_{id(self)}")
@@ -130,20 +127,13 @@ class MrRippah:
             total=len(track_ids),
             disable=self.log_level not in (logging.DEBUG, logging.INFO),
         ) as progress_bar:
-            if self.parallel:
-                with concurrent.futures.ProcessPoolExecutor(
-                    max_workers=MAX_WORKERS
-                ) as executor:
-                    for _ in executor.map(MrRippah._rip_track, track_ids):
-                        progress_bar.update(1)
-            else:
-                for track_id in track_ids:
-                    self.rip_track(track_id)
-                    progress_bar.update(1)
-                    self.logger.debug(
-                        f"Waiting {SUCCESSFUL_DOWNLOAD_DELAY_SECONDS} seconds to start next download"
-                    )
-                    time.sleep(SUCCESSFUL_DOWNLOAD_DELAY_SECONDS)
+            for track_id in track_ids:
+                self.rip_track(track_id)
+                progress_bar.update(1)
+                self.logger.debug(
+                    f"Waiting {SUCCESSFUL_DOWNLOAD_DELAY_SECONDS} seconds to start next download"
+                )
+                time.sleep(SUCCESSFUL_DOWNLOAD_DELAY_SECONDS)
 
     def rip_track(self, track_uri: str) -> None:
         self.logger.debug(f"{track_uri} Ripping track")
@@ -231,21 +221,3 @@ class MrRippah:
             )
 
         audio.save()
-
-    @classmethod
-    def _rip_track(cls, track_uri):
-        num_retries = 0
-        while num_retries < MAX_RETRIES:
-            mr = cls()
-            if num_retries:
-                mr.logger.debug(f"Retry attempt {num_retries} for {track_uri}")
-            try:
-                mr.rip_track(track_uri)
-            except Exception as e:
-                num_retries += 1
-                mr.logger.debug(f"Failed to rip {track_uri}: {e}")
-                wait_time = RETRY_DELAY_SECONDS * num_retries
-                mr.logger.debug(f"Retrying in {wait_time} seconds")
-                time.sleep(wait_time)
-            else:
-                break

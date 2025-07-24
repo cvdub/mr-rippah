@@ -1,4 +1,5 @@
 import logging
+import re
 import time
 from io import BytesIO
 from pathlib import Path
@@ -26,6 +27,12 @@ MAX_WORKERS = 5
 MAX_RETRIES = 5
 RETRY_DELAY_SECONDS = 30
 SUCCESSFUL_DOWNLOAD_DELAY_SECONDS = 5
+
+SPOTIFY_PLAYLIST_REGEX = re.compile(r"^spotify:playlist:[A-Za-z0-9]{22}$")
+
+
+def is_spotify_playlist_uri(playlist_uri: str) -> bool:
+    return bool(SPOTIFY_PLAYLIST_REGEX.match(playlist_uri))
 
 
 class MrRippah:
@@ -106,7 +113,15 @@ class MrRippah:
         return self.spotify_api_request(f"tracks/{track_id}?market={SPOTIFY_MARKET}")
 
     def rip_playlist(self, playlist_uri: str) -> None:
-        self.logger.info(f"Ripping {playlist_uri}")
+        if playlist_uri.startswith(("http://", "https://")):
+            match = re.search(r"/playlist/([A-Za-z0-9]{22})", playlist_uri)
+            if match:
+                playlist_id = match.group(1)
+                playlist_uri = f"spotify:playlist:{playlist_id}"
+
+        if not is_spotify_playlist_uri(playlist_uri):
+            raise ValueError(f"Invalid Spotify playlist URI: {playlist_uri}")
+
         track_ids = []
         playlist_id = playlist_uri.lstrip("spotify:playlist:")
         playlist_items = self.spotify_api_request(

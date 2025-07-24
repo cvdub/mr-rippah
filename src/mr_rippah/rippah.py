@@ -25,6 +25,8 @@ SPOTIFY_MARKET = "US"
 SPOTIFY_API_URL = "https://api.spotify.com/v1/"
 MAX_WORKERS = 5
 MAX_RETRIES = 5
+RETRY_DELAY_SECONDS = 30
+SUCCESSFUL_DOWNLOAD_DELAY_SECONDS = 5
 
 
 class MrRippah:
@@ -65,6 +67,9 @@ class MrRippah:
                 self.logger.debug(f"Failed to get librespot session: {e}")
                 num_retries += 1
                 if num_retries < MAX_RETRIES:
+                    wait_time = RETRY_DELAY_SECONDS * num_retries
+                    self.logger.debug(f"Retrying in {wait_time} seconds")
+                    time.sleep(wait_time)
                     self.logger.debug(
                         f"Retry attempt {num_retries} for librespot session"
                     )
@@ -135,6 +140,10 @@ class MrRippah:
                 for track_id in track_ids:
                     self.rip_track(track_id)
                     progress_bar.update(1)
+                    self.logger.debug(
+                        f"Waiting {SUCCESSFUL_DOWNLOAD_DELAY_SECONDS} seconds to start next download"
+                    )
+                    time.sleep(SUCCESSFUL_DOWNLOAD_DELAY_SECONDS)
 
     def rip_track(self, track_uri: str) -> None:
         self.logger.debug(f"{track_uri} Ripping track")
@@ -147,20 +156,36 @@ class MrRippah:
             return
 
         self.logger.debug(f"{track_uri} Saving track stream")
-        track_stream = self.librespot_session.content_feeder().load(
-            TrackId.from_base62(track_uri.lstrip("spotify:track:")),
-            VorbisOnlyAudioQuality(AudioQuality.VERY_HIGH),
-            True,  # Pre-load
-            None,
-        )
+        num_retries = 0
+        while num_retries < MAX_RETRIES:
+            try:
+                track_stream = self.librespot_session.content_feeder().load(
+                    TrackId.from_base62(track_uri.lstrip("spotify:track:")),
+                    VorbisOnlyAudioQuality(AudioQuality.VERY_HIGH),
+                    True,  # Pre-load
+                    None,
+                )
 
-        audio_bytes = BytesIO()
-        while True:
-            chunk = track_stream.input_stream.stream().read(CHUNK_SIZE)
-            if not chunk:
+                audio_bytes = BytesIO()
+                while True:
+                    chunk = track_stream.input_stream.stream().read(CHUNK_SIZE)
+                    if not chunk:
+                        break
+
+                    audio_bytes.write(chunk)
+            except Exception as e:
+                num_retries += 1
+                self.logger.debug(f"Failed to rip {track_uri}: {e}")
+                wait_time = RETRY_DELAY_SECONDS * num_retries
+                self.logger.debug(f"Retrying in {wait_time} seconds")
+                time.sleep(wait_time)
+                if num_retries >= MAX_RETRIES:
+                    self.logger.error(
+                        f"Failed to rip {track_uri} after {num_retries} retries"
+                    )
+                    raise e
+            else:
                 break
-
-            audio_bytes.write(chunk)
 
         self.logger.debug(f"{track_uri} Converting track to MP3")
         audio_bytes.seek(0)
@@ -169,7 +194,7 @@ class MrRippah:
             DOWNLOADS_DIRECTORY
             / metadata["album"]["artists"][0]["name"]
             / metadata["album"]["name"]
-            / f"{metadata["track_number"]:02} - {metadata["name"]}.mp3"
+            / f"{metadata['track_number']:02} - {metadata['name']}.mp3"
         )
         track_path.parent.mkdir(parents=True, exist_ok=True)
         audio.export(
@@ -217,7 +242,10 @@ class MrRippah:
             try:
                 mr.rip_track(track_uri)
             except Exception as e:
-                mr.logger.debug(f"Failed to rip {track_uri}: {e}")
                 num_retries += 1
+                mr.logger.debug(f"Failed to rip {track_uri}: {e}")
+                wait_time = RETRY_DELAY_SECONDS * num_retries
+                mr.logger.debug(f"Retrying in {wait_time} seconds")
+                time.sleep(wait_time)
             else:
                 break

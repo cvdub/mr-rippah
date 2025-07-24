@@ -35,7 +35,12 @@ def main():
         log_level = logging.INFO
 
     mr = MrRippah(log_level=log_level)
-    mr.rip_playlist(args.uri)
+    try:
+        mr.rip_playlist(args.uri)
+    except Exception as e:
+        mr.logger.error(str(e))
+        raise SystemExit(1)
+
     end_time = time.perf_counter()
     mr.logger.info(f"Ripped playlist in {end_time - start_time:,.2f} seconds")
 

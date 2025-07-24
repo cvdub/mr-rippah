@@ -1,3 +1,8 @@
+import warnings
+
+# Ignore SyntaxWarning specifically
+warnings.filterwarnings("ignore", category=SyntaxWarning)
+
 import logging
 import re
 import time

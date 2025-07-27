@@ -1,9 +1,22 @@
 # Mr. Rippah
 
 ## Installation
-1. Install `uv`, the Python package manager ([instructions](https://docs.astral.sh/uv/getting-started/installation/))
+1. Install `ffmpeg`.
+Mr. Rippah uses `ffmpeg` to convert Spotify OGG streams to MP3 files.
 
-2. Install `mr-rippah`
+**macOS**
+```console
+$ brew install ffmpeg
+```
+
+**Windows**
+```console
+$ choco install ffmpeg
+```
+
+2. Install `uv`, the Python package manager ([instructions](https://docs.astral.sh/uv/getting-started/installation/))
+
+3. Install `mr-rippah`
 ```console
 $ uv tool install 'git+https://github.com/cvdub/mr-rippah'
 ```

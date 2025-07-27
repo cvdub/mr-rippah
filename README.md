@@ -10,8 +10,7 @@ $ uv tool install 'git+https://github.com/cvdub/mr-rippah'
 
 3. Install `ffmpeg`
 
-Mr. Rippah uses `ffmpeg` to convert Spotify OGG streams to MP3 files. If you don't already have it, you can install it with `brew` on macOS and `choco` on Windows.
-
+Mr. Rippah uses `ffmpeg` to convert Spotify OGG streams to MP3 files. You can install `ffmpeg` with `brew` on macOS and `choco` on Windows.
 
 ## Usage
 ```console

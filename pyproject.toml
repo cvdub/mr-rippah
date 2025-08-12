@@ -40,4 +40,4 @@ allow-direct-references = true
 packages = ["src/mr_rippah"]
 
 [tool.uv.sources]
-librespot = { git = "https://github.com/kokarare1212/librespot-python", rev = "322584bf432c11ebe6d0a886449ea9cca4c94b56" }
+librespot = { git = "https://github.com/kokarare1212/librespot-python", rev = "3a6ce32d0d1aa69a3f6f957ad2e35cdd7ddbc278" }

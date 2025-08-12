@@ -1,5 +1,5 @@
 version = 1
-revision = 2
+revision = 3
 requires-python = ">=3.13"
 
 [[package]]
@@ -112,7 +112,7 @@ wheels = [
 [[package]]
 name = "librespot"
 version = "0.0.9"
-source = { git = "https://github.com/kokarare1212/librespot-python?rev=322584bf432c11ebe6d0a886449ea9cca4c94b56#322584bf432c11ebe6d0a886449ea9cca4c94b56" }
+source = { git = "https://github.com/kokarare1212/librespot-python?rev=3a6ce32d0d1aa69a3f6f957ad2e35cdd7ddbc278#3a6ce32d0d1aa69a3f6f957ad2e35cdd7ddbc278" }
 dependencies = [
     { name = "defusedxml" },
     { name = "protobuf" },
@@ -140,7 +140,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "audioop-lts", specifier = ">=0.2.1" },
-    { name = "librespot", git = "https://github.com/kokarare1212/librespot-python?rev=322584bf432c11ebe6d0a886449ea9cca4c94b56" },
+    { name = "librespot", git = "https://github.com/kokarare1212/librespot-python?rev=3a6ce32d0d1aa69a3f6f957ad2e35cdd7ddbc278" },
     { name = "mutagen", specifier = ">=1.47.0" },
     { name = "platformdirs", specifier = ">=4.3.8" },
     { name = "pydub", specifier = ">=0.25.1" },

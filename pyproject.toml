@@ -7,11 +7,11 @@ authors = [
 ]
 dependencies = [
     "audioop-lts>=0.2.1",
-    "librespot",
+    "librespot-spotizerr",
     "mutagen>=1.47.0",
     "platformdirs>=4.3.8",
     "pydub>=0.25.1",
-    "requests>=2.32.4",
+    "requests==2.32.3",
     "tqdm>=4.67.1",
 ]
 readme = "README.md"
@@ -40,4 +40,4 @@ allow-direct-references = true
 packages = ["src/mr_rippah"]
 
 [tool.uv.sources]
-librespot = { git = "https://github.com/kokarare1212/librespot-python", rev = "3a6ce32d0d1aa69a3f6f957ad2e35cdd7ddbc278" }
+librespot-spotizerr = { git = "https://github.com/Xoconoch/librespot-spotizerr", rev = "e6e3b418ee8b946f4f18eadc3c005060b63e59d8" }

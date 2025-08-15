@@ -11,6 +11,12 @@ def main():
         "uri",
         help="spotify playlist URI",
     )
+    parser.add_argument(
+        "-c",
+        "--clear-existing-credentials",
+        action="store_true",
+        help="clear existing credentials",
+    )
     verbosity_group = parser.add_mutually_exclusive_group()
     verbosity_group.add_argument(
         "-v", "--verbose", action="store_true", help="enable verbose logging"
@@ -35,6 +41,7 @@ def main():
         log_level = logging.INFO
 
     mr = MrRippah(log_level=log_level)
+    mr.start_session(clear_existing_credentials=args.clear_existing_credentials)
     try:
         mr.rip_playlist(args.uri)
     except Exception as e:

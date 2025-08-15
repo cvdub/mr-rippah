@@ -70,8 +70,12 @@ class MrRippah:
         handler.setFormatter(formatter)
         self.logger.addHandler(handler)
 
+    def start_session(self, clear_existing_credentials: bool = False) -> None:
+        if clear_existing_credentials:
+            CREDENTIALS_FILE.unlink(missing_ok=True)
+
         if not CREDENTIALS_FILE.exists():
-            self.logger.info("No cached credentials")
+            self.logger.info("Getting Spotify credentials")
             self.get_credentials()
 
         self.logger.debug("Starting librespot session")
@@ -107,12 +111,11 @@ class MrRippah:
         self.logger.info(f"Select {DEVICE_NAME} in Spotify client to authenticate")
         while True:
             time.sleep(1)
-            if zeroconf.has_valid_session():
-                self.logger.info("Got Spotify credentials!")
-                zeroconf.close_session()
-                zeroconf.close()
-                while not CREDENTIALS_FILE.exists():
-                    time.sleep(0.1)  # Give credentials file time to save
+            if zeroconf._ZeroconfServer__session:
+                if CREDENTIALS_FILE.exists():
+                    self.logger.info("Got Spotify credentials!")
+                    zeroconf.close_session()
+                    zeroconf.close()
 
                 return
 

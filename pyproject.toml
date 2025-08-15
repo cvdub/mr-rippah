@@ -40,4 +40,4 @@ allow-direct-references = true
 packages = ["src/mr_rippah"]
 
 [tool.uv.sources]
-librespot-spotizerr = { git = "https://github.com/Xoconoch/librespot-spotizerr", rev = "e6e3b418ee8b946f4f18eadc3c005060b63e59d8" }
+librespot-spotizerr = { git = "https://github.com/cvdub/librespot-spotizerr", rev = "a2d0205516f43776aad8a7e8d6dbf23940a08111" }

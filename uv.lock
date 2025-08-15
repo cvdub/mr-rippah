@@ -121,7 +121,7 @@ wheels = [
 [[package]]
 name = "librespot-spotizerr"
 version = "0.0.0"
-source = { git = "https://github.com/Xoconoch/librespot-spotizerr?rev=e6e3b418ee8b946f4f18eadc3c005060b63e59d8#e6e3b418ee8b946f4f18eadc3c005060b63e59d8" }
+source = { git = "https://github.com/cvdub/librespot-spotizerr?rev=a2d0205516f43776aad8a7e8d6dbf23940a08111#a2d0205516f43776aad8a7e8d6dbf23940a08111" }
 dependencies = [
     { name = "defusedxml" },
     { name = "protobuf" },
@@ -149,7 +149,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "audioop-lts", specifier = ">=0.2.1" },
-    { name = "librespot-spotizerr", git = "https://github.com/Xoconoch/librespot-spotizerr?rev=e6e3b418ee8b946f4f18eadc3c005060b63e59d8" },
+    { name = "librespot-spotizerr", git = "https://github.com/cvdub/librespot-spotizerr?rev=a2d0205516f43776aad8a7e8d6dbf23940a08111" },
     { name = "mutagen", specifier = ">=1.47.0" },
     { name = "platformdirs", specifier = ">=4.3.8" },
     { name = "pydub", specifier = ">=0.25.1" },

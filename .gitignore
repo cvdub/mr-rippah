@@ -8,3 +8,8 @@ wheels/
 
 # venv
 .venv
+
+
+# Added by cargo
+
+/target

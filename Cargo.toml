@@ -11,9 +11,10 @@ anyhow = "1"
 clap = { version = "4", features = ["derive"] }
 directories = "5"
 env_logger = "0.11"
+futures-util = "0.3"
 id3 = "1"
 indicatif = "0.17"
-librespot = { version = "0.4", default-features = false, features = ["zeroconf", "rodio-backend"] }
+librespot = { version = "0.7", default-features = false, features = ["with-libmdns", "native-tls"] }
 log = "0.4"
 reqwest = { version = "0.11", features = ["json", "stream", "blocking"] }
 serde = { version = "1", features = ["derive"] }

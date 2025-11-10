@@ -1,9 +1,7 @@
 use std::{
-    fs,
-    io::Write,
+    fs, io,
     path::{Path, PathBuf},
     process::Command,
-    sync::Arc,
     time::Duration,
 };
 
@@ -11,19 +9,21 @@ use anyhow::{Context, Result};
 use clap::{ArgAction, Parser};
 use directories::{ProjectDirs, UserDirs};
 use env_logger::Env;
+use futures_util::StreamExt;
 use id3::{Tag, TagLike, Version, frame::PictureType};
 use indicatif::{ProgressBar, ProgressStyle};
 use librespot::{
+    audio::{AudioDecrypt, AudioFile as SpotifyAudioFile},
     core::{
         cache::Cache,
         config::{DeviceType, SessionConfig},
         session::Session,
         spotify_id::SpotifyId,
     },
-    discovery::discovery::DiscoveryStream,
-    metadata::{AudioFile, AudioFileFormat, Metadata, Track},
+    discovery::{Credentials, Discovery},
+    metadata::{Metadata, Track, audio::AudioFileFormat},
 };
-use log::{LevelFilter, debug, error, info};
+use log::{LevelFilter, debug, error, info, warn};
 use reqwest::blocking::Client;
 use serde::Deserialize;
 use tempfile::NamedTempFile;
@@ -105,11 +105,8 @@ struct ExternalIds {
 
 struct MrRippah {
     session: Session,
-    cache: Arc<Cache>,
     downloads_dir: PathBuf,
-    credentials_path: PathBuf,
     http_client: Client,
-    log_level: LevelFilter,
 }
 
 impl MrRippah {
@@ -123,17 +120,34 @@ impl MrRippah {
             fs::remove_file(&credentials_path).context("Unable to remove cached credentials")?;
         }
 
-        let cache = Arc::new(
-            Cache::new(
-                Some(cache_dir.to_path_buf()),
-                Some(cache_dir.join("audio")),
-                Some(cache_dir.join("volume")),
-                Some(cache_dir.to_path_buf()),
-            )
-            .context("Unable to initialise librespot cache")?,
-        );
+        let cache = Cache::new(
+            Some(cache_dir.to_path_buf()),
+            Some(cache_dir.to_path_buf()),
+            Some(cache_dir.join("audio")),
+            None,
+        )
+        .context("Unable to initialise librespot cache")?;
 
-        let session = Self::create_session(&cache, &credentials_path, log_level).await?;
+        let mut session_config = SessionConfig::default();
+        let device_id_path = cache_dir.join("device_id.txt");
+        let cached_device_id = if device_id_path.exists() {
+            fs::read_to_string(&device_id_path)
+                .context("Unable to read cached device identifier")?
+                .trim()
+                .to_owned()
+        } else {
+            String::new()
+        };
+        let device_id = if cached_device_id.is_empty() {
+            let new_id = session_config.device_id.clone();
+            fs::write(&device_id_path, &new_id).context("Unable to persist device identifier")?;
+            new_id
+        } else {
+            cached_device_id
+        };
+        session_config.device_id = device_id;
+
+        let session = Self::create_session(&cache, &session_config, log_level).await?;
 
         let downloads_dir = UserDirs::new()
             .and_then(|dirs| dirs.download_dir().map(|path| path.to_path_buf()))
@@ -141,42 +155,30 @@ impl MrRippah {
 
         Ok(Self {
             session,
-            cache,
             downloads_dir,
-            credentials_path,
             http_client: Client::builder()
                 .user_agent("Mr Rippah")
                 .build()
                 .context("Unable to build HTTP client")?,
-            log_level,
         })
     }
 
     async fn create_session(
-        cache: &Arc<Cache>,
-        credentials_path: &Path,
+        cache: &Cache,
+        session_config: &SessionConfig,
         log_level: LevelFilter,
     ) -> Result<Session> {
-        if !credentials_path.exists() {
-            info!("Getting Spotify credentials");
-            Self::perform_pairing(cache, credentials_path, log_level).await?;
-        }
-
-        let session_config = SessionConfig {
-            device_id: cache
-                .device_id()
-                .cloned()
-                .unwrap_or_else(|| SessionConfig::default().device_id),
-            user_agent: format!("{} ({})", DEVICE_NAME, env!("CARGO_PKG_VERSION")),
-            device_type: DeviceType::Computer,
-            ..Default::default()
+        let credentials = match cache.credentials() {
+            Some(credentials) => credentials,
+            None => {
+                info!("Getting Spotify credentials");
+                Self::perform_pairing(cache, session_config, log_level).await?
+            }
         };
 
-        let credentials = cache
-            .credentials()
-            .context("Unable to load cached Spotify credentials")?;
-
-        let session = Session::connect(session_config, credentials, Some(cache.clone()), None)
+        let session = Session::new(session_config.clone(), Some(cache.clone()));
+        session
+            .connect(credentials, true)
             .await
             .context("Unable to establish librespot session")?;
 
@@ -185,45 +187,39 @@ impl MrRippah {
 
     async fn perform_pairing(
         cache: &Cache,
-        credentials_path: &Path,
+        session_config: &SessionConfig,
         log_level: LevelFilter,
-    ) -> Result<()> {
-        let device_id = cache
-            .device_id()
-            .cloned()
-            .unwrap_or_else(|| SessionConfig::default().device_id);
-
-        let mut discovery = DiscoveryStream::builder(DEVICE_NAME, device_id)
-            .enable_backends(true)
-            .build()
-            .context("Unable to start librespot zeroconf server")?;
+    ) -> Result<Credentials> {
+        let mut discovery = Discovery::builder(
+            session_config.device_id.clone(),
+            session_config.client_id.clone(),
+        )
+        .name(DEVICE_NAME.to_string())
+        .device_type(DeviceType::Computer)
+        .launch()
+        .context("Unable to start librespot discovery")?;
 
         info!("Select {DEVICE_NAME} in the Spotify client to authenticate");
 
-        while let Some(event) = discovery.next().await {
-            match event {
-                librespot::discovery::discovery::Event::Credentials { credentials, .. } => {
-                    cache
-                        .save_credentials(&credentials)
-                        .context("Unable to cache credentials")?;
-                    let json = serde_json::to_vec(&credentials)
-                        .context("Unable to serialise credentials")?;
-                    fs::write(credentials_path, json).context("Unable to persist credentials")?;
-                    info!("Got Spotify credentials!");
-                    break;
-                }
-                librespot::discovery::discovery::Event::Error(error) => {
-                    error!("Discovery error: {error}");
+        let credentials = loop {
+            match discovery.next().await {
+                Some(credentials) => break credentials,
+                None => {
+                    error!("Discovery ended unexpectedly");
                     if log_level <= LevelFilter::Debug {
-                        debug!("Retrying discovery after error");
+                        debug!("Restart discovery after unexpected shutdown");
                     }
-                    sleep(Duration::from_secs(1)).await;
+                    discovery.shutdown().await;
+                    anyhow::bail!("Discovery ended before receiving credentials");
                 }
-                _ => {}
             }
-        }
+        };
 
-        Ok(())
+        discovery.shutdown().await;
+        cache.save_credentials(&credentials);
+        info!("Got Spotify credentials!");
+
+        Ok(credentials)
     }
 
     async fn rip_playlist(&self, playlist_uri: &str) -> Result<()> {
@@ -328,31 +324,36 @@ impl MrRippah {
 
     async fn download_track_audio(&self, track_id: &str) -> Result<PathBuf> {
         let spotify_id = SpotifyId::from_base62(track_id).context("Invalid track identifier")?;
-        let track = Track::get(&self.session, spotify_id)
+        let track = Track::get(&self.session, &spotify_id)
             .await
             .context("Unable to fetch track metadata")?;
 
-        let file = track
-            .files
-            .get(&AudioFileFormat::OGG_VORBIS_320)
-            .or_else(|| track.files.get(&AudioFileFormat::OGG_VORBIS_160))
-            .or_else(|| track.files.get(&AudioFileFormat::OGG_VORBIS_96))
-            .context("No supported audio files available for track")?;
+        let (format, file_id) = [
+            AudioFileFormat::OGG_VORBIS_320,
+            AudioFileFormat::OGG_VORBIS_160,
+            AudioFileFormat::OGG_VORBIS_96,
+        ]
+        .into_iter()
+        .find_map(|format| track.files.get(&format).copied().map(|file| (format, file)))
+        .context("No supported audio files available for track")?;
 
-        let mut audio_file = self
-            .session
-            .audio_file()
-            .get(audio_file_id(file))
+        let bytes_per_second = stream_data_rate(format);
+
+        let encrypted = SpotifyAudioFile::open(&self.session, file_id, bytes_per_second)
             .await
             .context("Unable to fetch Spotify audio file")?;
 
-        let mut temp = NamedTempFile::new().context("Unable to create temporary file")?;
+        let key = match self.session.audio_key().request(spotify_id, file_id).await {
+            Ok(key) => Some(key),
+            Err(error) => {
+                warn!("Unable to load audio key for {track_id}: {error}");
+                None
+            }
+        };
 
-        while let Some(chunk) = audio_file.next().await {
-            let bytes = chunk.context("Error reading audio chunk")?;
-            temp.write_all(&bytes)
-                .context("Unable to write audio chunk to disk")?;
-        }
+        let mut decrypted = AudioDecrypt::new(key, encrypted);
+        let mut temp = NamedTempFile::new().context("Unable to create temporary file")?;
+        io::copy(&mut decrypted, &mut temp).context("Unable to write audio to disk")?;
 
         let (_, path) = temp.keep().context("Unable to persist downloaded audio")?;
         Ok(path)
@@ -505,8 +506,28 @@ impl MrRippah {
     }
 }
 
-fn audio_file_id(file: &AudioFile) -> librespot::playback::audio_backend::SinkFile {
-    librespot::playback::audio_backend::SinkFile::new(file.file_id)
+fn stream_data_rate(format: AudioFileFormat) -> usize {
+    match format {
+        AudioFileFormat::OGG_VORBIS_96 => 12 * 1024,
+        AudioFileFormat::OGG_VORBIS_160 => 20 * 1024,
+        AudioFileFormat::OGG_VORBIS_320 => 40 * 1024,
+        AudioFileFormat::MP3_256 => 32 * 1024,
+        AudioFileFormat::MP3_320 => 40 * 1024,
+        AudioFileFormat::MP3_160 => 20 * 1024,
+        AudioFileFormat::MP3_96 => 12 * 1024,
+        AudioFileFormat::MP3_160_ENC => 20 * 1024,
+        AudioFileFormat::AAC_24 => 3 * 1024,
+        AudioFileFormat::AAC_48 => 6 * 1024,
+        AudioFileFormat::AAC_160 => 20 * 1024,
+        AudioFileFormat::AAC_320 => 40 * 1024,
+        AudioFileFormat::MP4_128 => 16 * 1024,
+        AudioFileFormat::OTHER5 => 40 * 1024,
+        AudioFileFormat::FLAC_FLAC => 112 * 1024,
+        AudioFileFormat::XHE_AAC_12 => 1536,
+        AudioFileFormat::XHE_AAC_16 => 2048,
+        AudioFileFormat::XHE_AAC_24 => 3072,
+        AudioFileFormat::FLAC_FLAC_24BIT => 3072,
+    }
 }
 
 #[tokio::main]

@@ -1,7 +1,7 @@
 [project]
 name = "mr-rippah"
-version = "0.1.1"
-description = "Add your description here"
+version = "0.2.0"
+description = "Fat rips!"
 authors = [
     { name = "Christian Vanderwall", email = "christian@cvdub.net" }
 ]

@@ -33,6 +33,13 @@ SPOTIFY_CDN_URL = "https://i.scdn.co/image/"
 SPOTIFY_PLAYLIST_REGEX = re.compile(r"^spotify:playlist:[A-Za-z0-9]{22}$")
 
 
+class RipFailedError(Exception):
+    def __init__(self, message: str, track_uri: str, original_error: Exception = None):
+        super().__init__(message)
+        self.track_uri = track_uri
+        self.original_error = original_error
+
+
 def is_spotify_playlist_uri(playlist_uri: str) -> bool:
     return bool(SPOTIFY_PLAYLIST_REGEX.match(playlist_uri))
 
@@ -127,38 +134,53 @@ class MrRippah:
 
         playlist_id = PlaylistId.from_uri(playlist_uri)
         playlist = self._api.get_playlist(playlist_id)
-
+        successes = []
+        failures = []
         with tqdm(
             desc="Tracks ripped",
             total=playlist.length,
             disable=self.log_level not in (logging.DEBUG, logging.INFO),
         ) as progress_bar:
             for item in playlist.contents.items:
-                self.rip_track(item.uri, download_directory)
+                try:
+                    self.rip_track(item.uri, download_directory)
+                except RipFailedError as e:
+                    self.logger.debug(f"{e}: {e.track_uri}")
+                    failures.append(e)
+                else:
+                    successes.append(item.uri)
+                    self.logger.debug(
+                        f"Waiting {SUCCESSFUL_DOWNLOAD_DELAY_SECONDS} seconds to start next download"
+                    )
+                    time.sleep(SUCCESSFUL_DOWNLOAD_DELAY_SECONDS)
                 progress_bar.update(1)
-                self.logger.debug(
-                    f"Waiting {SUCCESSFUL_DOWNLOAD_DELAY_SECONDS} seconds to start next download"
-                )
-                time.sleep(SUCCESSFUL_DOWNLOAD_DELAY_SECONDS)
+
+        self.logger.info(f"Ripped {len(successes):,}{playlist.length:,} tracks")
+        if failures:
+            self.logger.warning(f"Failed to rip {len(failures):,} tracks")
+            for exception in failures:
+                self.logger.warning(f"{exception.track_uri}: {exception}")
 
     def rip_track(self, track_uri: str, download_directory: Path) -> None:
         if track_uri.startswith("spotify:local:"):
-            self.logger.debug(f"Skipping track local track: {track_uri}")
-            return
+            raise RipFailedError("Can't rip local tracks", track_uri)
 
         if not track_uri.startswith("spotify:"):
             track_uri = f"spotify:track:{track_uri}"
         try:
             track_id = TrackId.from_uri(track_uri)
         except RuntimeError:
-            self.logger.debug(f"Skipping track with invalid track URI: {track_uri}")
-            return
+            raise RipFailedError("Invalid track URI", track_uri)
 
         self.logger.debug(f"Getting track metadata: {track_uri}")
         metadata = self._api.get_metadata_4_track(track_id)
-        if not metadata.file:
-            self.logger.debug(f"Skipping unplayable track: {track_uri}")
-            return
+        if metadata.alternative:
+            track_id = TrackId.from_hex(metadata.alternative[0].gid.hex())
+            metadata = self._api.get_metadata_4_track(track_id)
+            self.logger.debug(f"Re-linked {track_uri} to {track_id.to_spotify_uri()}")
+
+        if not metadata.file and not metadata.alternative:
+            raise RipFailedError("Track is unplayable", track_uri)
 
         self.logger.debug(f"Saving track stream: {track_uri}")
         num_retries = 0
@@ -188,7 +210,9 @@ class MrRippah:
                     self.logger.error(
                         f"Failed to rip {track_uri} after {num_retries} retries"
                     )
-                    raise e
+                    raise RipFailedError(
+                        "Failed to get track stream", track_uri, original_error=e
+                    )
             else:
                 break
 
@@ -227,7 +251,12 @@ class MrRippah:
         audio.save()
 
         audio = ID3(track_path)
-        audio.add(TXXX(desc="spotify_uris", text=list(track_id.to_spotify_uri())))
+        spotify_track_uris = [track_uri]
+        final_track_uri = track_id.to_spotify_uri()
+        if final_track_uri != track_uri:
+            # Store original and re-linked URI in ID3 tag
+            spotify_track_uris.append(final_track_uri)
+        audio.add(TXXX(desc="spotify_uris", text=spotify_track_uris))
 
         # Download album art
         if metadata.album.cover_group.image:

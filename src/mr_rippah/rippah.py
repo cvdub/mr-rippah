@@ -72,6 +72,10 @@ class TrackRipResult:
     path: Path | None = None
 
 
+def spotify_oauth_callback(url: str) -> None:
+    webbrowser.open(url)
+
+
 class MrRippah:
     """Spotify playlist ripper that downloads tracks as MP3 files with metadata.
 
@@ -86,6 +90,7 @@ class MrRippah:
         track_download_retries: Number of retry attempts for track downloads.
         retry_delay_seconds: Base delay in seconds between retry attempts.
         successful_download_delay_seconds: Delay between successful downloads to avoid rate limiting.
+        spotify_oauth_callback: Callback function invoked with OAuth URL during authentication.
     """
 
     credentials_path: Path
@@ -95,6 +100,7 @@ class MrRippah:
     track_download_retries: int
     retry_delay_seconds: int
     successful_download_delay_seconds: int
+    spotify_oauth_callback: callable
 
     def __init__(
         self,
@@ -105,6 +111,7 @@ class MrRippah:
         track_download_retries: int = 5,
         retry_delay_seconds: int = 5,
         successful_download_delay_seconds: int = 5,
+        spotify_oauth_callback: callable = spotify_oauth_callback,
     ):
         """Initialize Mr. Rippah with configuration options.
 
@@ -120,6 +127,8 @@ class MrRippah:
                 Defaults to 5.
             successful_download_delay_seconds: Delay between successful track downloads to
                 avoid rate limiting. Defaults to 5.
+            spotify_oauth_callback: Callback function invoked with OAuth URL during authentication.
+                Defaults to opening the URL in a web browser.
         """
         self.credentials_path = credentials_path or self.default_credentials_path()
         self.download_directory = download_directory or Path(user_downloads_dir())
@@ -128,6 +137,7 @@ class MrRippah:
         self.track_download_retries = track_download_retries
         self.retry_delay_seconds = retry_delay_seconds
         self.successful_download_delay_seconds = successful_download_delay_seconds
+        self.spotify_oauth_callback = spotify_oauth_callback
 
     @staticmethod
     def default_credentials_path() -> Path:
@@ -213,7 +223,7 @@ class MrRippah:
         while num_retries < self.spotify_authentication_retries:
             try:
                 self._session = session_builder.oauth(
-                    lambda url: webbrowser.open(url), success_page
+                    self.spotify_oauth_callback, success_page
                 ).create()
             except (RuntimeError, ConnectionRefusedError) as e:
                 logger.debug(f"Failed to get librespot session: {e}")

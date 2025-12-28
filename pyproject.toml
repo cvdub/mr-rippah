@@ -12,7 +12,7 @@ dependencies = [
     "platformdirs>=4.3.8",
     "pydub>=0.25.1",
     "requests==2.32.3",
-    "tqdm>=4.67.1",
+    "rich>=14.2.0",
 ]
 readme = "README.md"
 requires-python = ">= 3.13"

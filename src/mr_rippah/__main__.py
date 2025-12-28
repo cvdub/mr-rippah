@@ -3,6 +3,7 @@ import logging
 import time
 
 from mr_rippah import MrRippah
+from rich.logging import RichHandler
 
 
 def main():
@@ -40,13 +41,35 @@ def main():
     else:
         log_level = logging.INFO
 
-    with MrRippah(
-        log_level=log_level, clear_spotify_credentials=args.clear_spotify_credentials
-    ) as mr:
+    # Configure logging with RichHandler
+    logging.basicConfig(
+        level=logging.WARNING,  # Set root logger to WARNING to suppress dependency logs
+        format="%(message)s",
+        handlers=[
+            RichHandler(
+                show_time=False,
+                show_path=False,
+                show_level=False,
+                markup=False,
+                rich_tracebacks=True,
+            )
+        ],
+    )
+
+    # Only set application logger to user-specified level
+    app_logger = logging.getLogger("mr_rippah")
+    app_logger.setLevel(log_level)
+
+    logger = logging.getLogger(__name__)
+
+    if log_level == logging.DEBUG:
+        logger.debug("Log level set to debug")
+
+    with MrRippah(clear_spotify_credentials=args.clear_spotify_credentials) as mr:
         mr.rip_playlist(args.uri)
 
     end_time = time.perf_counter()
-    mr.logger.info(f"Ripped playlist in {end_time - start_time:,.2f} seconds")
+    logger.info(f"Ripped playlist in {end_time - start_time:,.2f} seconds")
 
 
 if __name__ == "__main__":

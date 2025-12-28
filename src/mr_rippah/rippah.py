@@ -1,5 +1,6 @@
 import logging
 import re
+import sys
 import time
 import warnings
 import webbrowser
@@ -14,7 +15,16 @@ from librespot.metadata import PlaylistId, TrackId
 from mutagen.easyid3 import EasyID3
 from mutagen.id3 import APIC, ID3, TXXX
 from platformdirs import user_cache_dir, user_downloads_dir
-from tqdm import tqdm
+from rich import box
+from rich.console import Console
+from rich.progress import (
+    BarColumn,
+    MofNCompleteColumn,
+    Progress,
+    SpinnerColumn,
+    TextColumn,
+)
+from rich.table import Table
 
 with warnings.catch_warnings(action="ignore", category=SyntaxWarning):
     from pydub import AudioSegment
@@ -32,6 +42,8 @@ SUCCESSFUL_DOWNLOAD_DELAY_SECONDS = 5
 SPOTIFY_CDN_URL = "https://i.scdn.co/image/"
 
 SPOTIFY_PLAYLIST_REGEX = re.compile(r"^spotify:playlist:[A-Za-z0-9]{22}$")
+
+logger = logging.getLogger(__name__)
 
 
 class RipFailedError(Exception):
@@ -61,31 +73,13 @@ def make_unique_directory(path: Path):
 
 
 class MrRippah:
-    def __init__(self, log_level=logging.INFO, clear_spotify_credentials: bool = False):
-        # Configure logger
-        self.log_level = log_level
-        self.logger = logging.getLogger(f"mr_rippah_{id(self)}")
-        self.logger.setLevel(log_level)
-        handler = logging.StreamHandler()
-        handler.setLevel(log_level)
-        if log_level == logging.DEBUG:
-            log_format = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-        else:
-            log_format = "%(message)s"
-
-        formatter = logging.Formatter(log_format)
-        handler.setFormatter(formatter)
-        self.logger.addHandler(handler)
-
-        if log_level == logging.DEBUG:
-            self.logger.debug("Log level set to debug")
-
+    def __init__(self, clear_spotify_credentials: bool = False):
         if clear_spotify_credentials:
             self.clear_credentials()
 
     def clear_credentials(self) -> None:
         """Delete saved Spotify credentials."""
-        self.logger.info("Clearing existing Spotify credentials")
+        logger.info("Clearing existing Spotify credentials")
         CREDENTIALS_FILE.unlink(missing_ok=True)
 
     def connect(self) -> Self:
@@ -95,7 +89,7 @@ class MrRippah:
         librespot_config = config_builder.build()
         session_builder = Session.Builder(librespot_config)
 
-        self.logger.info("Connecting to Spotify")
+        logger.debug("Connecting to Spotify")
         success_page = (
             "<html><body>"
             "<h1>Login Successful</h1>"
@@ -110,19 +104,18 @@ class MrRippah:
                     lambda url: webbrowser.open(url), success_page
                 ).create()
             except ConnectionRefusedError as e:
-                self.logger.debug(f"Failed to get librespot session: {e}")
+                logger.debug(f"Failed to get librespot session: {e}")
                 num_retries += 1
                 if num_retries < MAX_RETRIES:
                     wait_time = RETRY_DELAY_SECONDS * num_retries
-                    self.logger.debug(f"Retrying in {wait_time} seconds")
+                    logger.debug(f"Retrying in {wait_time} seconds")
                     time.sleep(wait_time)
-                    self.logger.debug(
-                        f"Retry attempt {num_retries} for librespot session"
-                    )
+                    logger.debug(f"Retry attempt {num_retries} for librespot session")
             else:
                 self._api = self._session.api()
                 break
 
+        logger.debug("Successfully connected to Spotify")
         return self
 
     def close(self) -> None:
@@ -153,36 +146,63 @@ class MrRippah:
         download_directory = make_unique_directory(
             DOWNLOADS_DIRECTORY / playlist_uri.split(":")[-1]
         )
-        self.logger.info(f"Ripping {playlist_uri} to {download_directory}")
-
         playlist_id = PlaylistId.from_uri(playlist_uri)
         playlist = self._api.get_playlist(playlist_id)
         successes = []
         failures = []
-        with tqdm(
-            desc="Tracks ripped",
-            total=playlist.length,
-            disable=self.log_level not in (logging.DEBUG, logging.INFO),
-        ) as progress_bar:
-            for item in playlist.contents.items:
+
+        # Disable progress bar in verbose/debug mode or non-terminal outputs
+        show_progress = (
+            logger.getEffectiveLevel() > logging.DEBUG and sys.stdout.isatty()
+        )
+
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            BarColumn(),
+            MofNCompleteColumn(),
+            disable=not show_progress,
+            transient=True,
+        ) as progress:
+            task = progress.add_task("Ripping!", total=playlist.length)
+            for track_num, item in enumerate(playlist.contents.items, start=1):
+                logger.debug(
+                    f"{item.uri} Ripping track {track_num:,}/{playlist.length:,}"
+                )
                 try:
                     self.rip_track(item.uri, download_directory)
                 except RipFailedError as e:
-                    self.logger.debug(f"{e}: {e.track_uri}")
+                    logger.debug(f"{e.track_uri} {e}")
                     failures.append(e)
                 else:
                     successes.append(item.uri)
-                    self.logger.debug(
-                        f"Waiting {SUCCESSFUL_DOWNLOAD_DELAY_SECONDS} seconds to start next download"
-                    )
-                    time.sleep(SUCCESSFUL_DOWNLOAD_DELAY_SECONDS)
-                progress_bar.update(1)
+                    if track_num != playlist.length:
+                        logger.debug(
+                            f"Waiting {SUCCESSFUL_DOWNLOAD_DELAY_SECONDS} seconds to start next download"
+                        )
+                        time.sleep(SUCCESSFUL_DOWNLOAD_DELAY_SECONDS)
+                progress.update(task, advance=1)
 
-        self.logger.info(f"Ripped {len(successes):,}{playlist.length:,} tracks")
+        logger.info(
+            f"Ripped {len(successes):,}/{playlist.length:,} tracks to {download_directory}"
+        )
         if failures:
-            self.logger.warning(f"Failed to rip {len(failures):,} tracks")
+            console = Console()
+            table = Table(
+                title=f"Failed to rip {len(failures):,} tracks",
+                show_header=True,
+                header_style="bold",
+                title_style="bold red",
+                title_justify="left",
+                box=box.SIMPLE,
+            )
+            table.add_column("Track URI", no_wrap=True)
+            table.add_column("Reason")
+
             for exception in failures:
-                self.logger.warning(f"{exception.track_uri}: {exception}")
+                table.add_row(exception.track_uri, str(exception))
+
+            console.print(table)
 
     def rip_track(self, track_uri: str, download_directory: Path) -> None:
         if track_uri.startswith("spotify:local:"):
@@ -195,17 +215,17 @@ class MrRippah:
         except RuntimeError:
             raise RipFailedError("Invalid track URI", track_uri)
 
-        self.logger.debug(f"Getting track metadata: {track_uri}")
+        logger.debug(f"{track_uri} Getting track metadata")
         metadata = self._api.get_metadata_4_track(track_id)
         if metadata.alternative:
             track_id = TrackId.from_hex(metadata.alternative[0].gid.hex())
             metadata = self._api.get_metadata_4_track(track_id)
-            self.logger.debug(f"Re-linked {track_uri} to {track_id.to_spotify_uri()}")
+            logger.debug(f"{track_uri} Re-linked to {track_id.to_spotify_uri()}")
 
         if not metadata.file and not metadata.alternative:
             raise RipFailedError("Track is unplayable", track_uri)
 
-        self.logger.debug(f"Saving track stream: {track_uri}")
+        logger.debug(f"{track_uri} Saving track stream")
         num_retries = 0
         while num_retries < MAX_RETRIES:
             try:
@@ -225,13 +245,13 @@ class MrRippah:
                     audio_bytes.write(chunk)
             except Exception as e:
                 num_retries += 1
-                self.logger.debug(f"Failed to rip {track_uri}: {e}")
+                logger.debug(f"{track_uri} Failed to rip: {e}")
                 wait_time = RETRY_DELAY_SECONDS * num_retries
-                self.logger.debug(f"Retrying in {wait_time} seconds")
+                logger.debug(f"Retrying in {wait_time} seconds")
                 time.sleep(wait_time)
                 if num_retries >= MAX_RETRIES:
-                    self.logger.error(
-                        f"Failed to rip {track_uri} after {num_retries} retries"
+                    logger.error(
+                        f"{track_uri} Failed to rip after {num_retries} retries"
                     )
                     raise RipFailedError(
                         "Failed to get track stream", track_uri, original_error=e
@@ -239,7 +259,7 @@ class MrRippah:
             else:
                 break
 
-        self.logger.debug(f"Converting track to MP3: {track_uri}")
+        logger.debug(f"{track_uri} Converting track to MP3")
         audio_bytes.seek(0)
         audio = AudioSegment.from_file(audio_bytes, format="ogg")
         track_path = (
@@ -255,7 +275,7 @@ class MrRippah:
             parameters=["-q:a", "0"],
         )
 
-        self.logger.debug(f"Saving track metadata to ID3 tags: {track_uri}")
+        logger.debug(f"{track_uri} Saving track metadata to ID3 tags")
         audio = EasyID3(track_path)
         audio["title"] = metadata.name
         audio["artist"] = metadata.artist[0].name
@@ -283,7 +303,7 @@ class MrRippah:
 
         # Download album art
         if metadata.album.cover_group.image:
-            self.logger.debug(f"Downloading album art: {track_uri}")
+            logger.debug(f"{track_uri} Downloading album art")
             image = metadata.album.cover_group.image[-1]
             file_id_hex = image.file_id.hex()
             cdn_url = f"{SPOTIFY_CDN_URL}{file_id_hex}"

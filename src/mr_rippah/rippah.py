@@ -14,7 +14,7 @@ from librespot.audio.decoders import AudioQuality, VorbisOnlyAudioQuality
 from librespot.core import Session
 from librespot.metadata import PlaylistId, TrackId
 from mutagen.easyid3 import EasyID3
-from mutagen.id3 import APIC, ID3, TXXX
+from mutagen.id3 import APIC, COMM, ID3, TXXX
 from platformdirs import user_cache_dir, user_downloads_dir
 from rich.progress import (
     BarColumn,
@@ -494,6 +494,7 @@ class MrRippah:
             # Store original and re-linked URI in ID3 tag
             spotify_track_uris.append(final_track_uri)
         audio.add(TXXX(desc="spotify_uris", text=spotify_track_uris))
+        audio.add(COMM(encoding=3, lang="eng", desc="", text=[track_uri]))
 
         # Download album art
         if metadata.album.cover_group.image:

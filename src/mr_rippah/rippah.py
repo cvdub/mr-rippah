@@ -4,6 +4,7 @@ import sys
 import time
 import warnings
 import webbrowser
+from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path
 from typing import Self
@@ -15,8 +16,6 @@ from librespot.metadata import PlaylistId, TrackId
 from mutagen.easyid3 import EasyID3
 from mutagen.id3 import APIC, ID3, TXXX
 from platformdirs import user_cache_dir, user_downloads_dir
-from rich import box
-from rich.console import Console
 from rich.progress import (
     BarColumn,
     MofNCompleteColumn,
@@ -24,7 +23,6 @@ from rich.progress import (
     SpinnerColumn,
     TextColumn,
 )
-from rich.table import Table
 
 with warnings.catch_warnings(action="ignore", category=SyntaxWarning):
     from pydub import AudioSegment
@@ -47,9 +45,16 @@ logger = logging.getLogger(__name__)
 
 
 class RipFailedError(Exception):
-    def __init__(self, message: str, track_uri: str, original_error: Exception = None):
+    def __init__(
+        self,
+        message: str,
+        uri: str,
+        title: str | None = None,
+        original_error: Exception = None,
+    ):
         super().__init__(message)
-        self.track_uri = track_uri
+        self.uri = uri
+        self.title = title
         self.original_error = original_error
 
 
@@ -70,6 +75,14 @@ def make_unique_directory(path: Path):
             candidate.mkdir()
             return candidate
         i += 1
+
+
+@dataclass
+class TrackRipResult:
+    uri: str
+    title: str | None
+    success: bool = True
+    failure_reason: str | None = None
 
 
 class MrRippah:
@@ -103,7 +116,7 @@ class MrRippah:
                 self._session = session_builder.oauth(
                     lambda url: webbrowser.open(url), success_page
                 ).create()
-            except ConnectionRefusedError as e:
+            except (RuntimeError, ConnectionRefusedError) as e:
                 logger.debug(f"Failed to get librespot session: {e}")
                 num_retries += 1
                 if num_retries < MAX_RETRIES:
@@ -133,7 +146,9 @@ class MrRippah:
     def __exit__(self, exc_type, exc_value, traceback):
         self.close()
 
-    def rip_playlist(self, playlist_uri: str) -> None:
+    def rip_playlist(
+        self, playlist_uri: str, show_progress: bool = True
+    ) -> list[TrackRipResult]:
         if playlist_uri.startswith(("http://", "https://")):
             match = re.search(r"/playlist/([A-Za-z0-9]{22})", playlist_uri)
             if match:
@@ -148,8 +163,7 @@ class MrRippah:
         )
         playlist_id = PlaylistId.from_uri(playlist_uri)
         playlist = self._api.get_playlist(playlist_id)
-        successes = []
-        failures = []
+        results = []
 
         # Disable progress bar in verbose/debug mode or non-terminal outputs
         show_progress = (
@@ -170,41 +184,31 @@ class MrRippah:
                     f"{item.uri} Ripping track {track_num:,}/{playlist.length:,}"
                 )
                 try:
-                    self.rip_track(item.uri, download_directory)
+                    result = self.rip_track(item.uri, download_directory)
                 except RipFailedError as e:
-                    logger.debug(f"{e.track_uri} {e}")
-                    failures.append(e)
+                    logger.debug(f"{e.uri} {e}")
+                    result = TrackRipResult(
+                        uri=e.uri,
+                        title=e.title,
+                        success=False,
+                        failure_reason=str(e),
+                    )
                 else:
-                    successes.append(item.uri)
                     if track_num != playlist.length:
                         logger.debug(
                             f"Waiting {SUCCESSFUL_DOWNLOAD_DELAY_SECONDS} seconds to start next download"
                         )
                         time.sleep(SUCCESSFUL_DOWNLOAD_DELAY_SECONDS)
+                results.append(result)
                 progress.update(task, advance=1)
 
+        num_successes = sum(1 for r in results if r.success)
         logger.info(
-            f"Ripped {len(successes):,}/{playlist.length:,} tracks to {download_directory}"
+            f"Ripped {num_successes:,}/{playlist.length:,} tracks to {download_directory}"
         )
-        if failures:
-            console = Console()
-            table = Table(
-                title=f"Failed to rip {len(failures):,} tracks",
-                show_header=True,
-                header_style="bold",
-                title_style="bold red",
-                title_justify="left",
-                box=box.SIMPLE,
-            )
-            table.add_column("Track URI", no_wrap=True)
-            table.add_column("Reason")
+        return results
 
-            for exception in failures:
-                table.add_row(exception.track_uri, str(exception))
-
-            console.print(table)
-
-    def rip_track(self, track_uri: str, download_directory: Path) -> None:
+    def rip_track(self, track_uri: str, download_directory: Path) -> TrackRipResult:
         if track_uri.startswith("spotify:local:"):
             raise RipFailedError("Can't rip local tracks", track_uri)
 
@@ -223,7 +227,7 @@ class MrRippah:
             logger.debug(f"{track_uri} Re-linked to {track_id.to_spotify_uri()}")
 
         if not metadata.file and not metadata.alternative:
-            raise RipFailedError("Track is unplayable", track_uri)
+            raise RipFailedError("Track is unplayable", track_uri, title=metadata.name)
 
         logger.debug(f"{track_uri} Saving track stream")
         num_retries = 0
@@ -254,7 +258,10 @@ class MrRippah:
                         f"{track_uri} Failed to rip after {num_retries} retries"
                     )
                     raise RipFailedError(
-                        "Failed to get track stream", track_uri, original_error=e
+                        "Failed to get track stream",
+                        track_uri,
+                        title=metadata.name,
+                        original_error=e,
                     )
             else:
                 break
@@ -320,3 +327,5 @@ class MrRippah:
                 )
 
         audio.save()
+
+        return TrackRipResult(uri=track_uri, title=metadata.name)

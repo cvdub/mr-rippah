@@ -3,7 +3,10 @@ import logging
 import time
 
 from mr_rippah import MrRippah
+from rich import box
+from rich.console import Console
 from rich.logging import RichHandler
+from rich.table import Table
 
 
 def main():
@@ -66,7 +69,30 @@ def main():
         logger.debug("Log level set to debug")
 
     with MrRippah(clear_spotify_credentials=args.clear_spotify_credentials) as mr:
-        mr.rip_playlist(args.uri)
+        results = mr.rip_playlist(args.uri)
+
+    failures = [result for result in results if not result.success]
+    if failures:
+        console = Console()
+        table = Table(
+            title=f"Failed to rip {len(failures):,} tracks",
+            show_header=True,
+            header_style="bold",
+            title_style="bold red",
+            title_justify="left",
+            box=box.SIMPLE,
+        )
+        reason_width = max(len(result.failure_reason) for result in failures)
+        table.add_column("Reason", no_wrap=True, min_width=reason_width, style="yellow")
+        table.add_column("Title", no_wrap=True)
+        table.add_column("URI", no_wrap=True, min_width=36)
+
+        for result in failures:
+            table.add_row(
+                result.failure_reason, result.title or "<Unknown>", result.uri
+            )
+
+        console.print(table)
 
     end_time = time.perf_counter()
     logger.info(f"Ripped playlist in {end_time - start_time:,.2f} seconds")

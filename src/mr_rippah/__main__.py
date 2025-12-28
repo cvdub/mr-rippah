@@ -1,5 +1,6 @@
 import argparse
 import logging
+import time
 
 from mr_rippah import MrRippah
 from rich import box
@@ -12,7 +13,7 @@ def main():
     parser = argparse.ArgumentParser(description="Mr. Rippah")
     parser.add_argument(
         "uri",
-        help="spotify playlist URI",
+        help="spotify playlist or track URI",
     )
     parser.add_argument(
         "-c",
@@ -69,7 +70,32 @@ def main():
         MrRippah.default_credentials_path().unlink(missing_ok=True)
 
     with MrRippah() as mr:
-        results = mr.rip_playlist(args.uri)
+        # Normalize URL to URI and detect type
+        uri = MrRippah.spotify_url_to_uri(args.uri)
+
+        if MrRippah.is_spotify_playlist_uri(uri):
+            results = mr.rip_playlist(uri)
+        elif MrRippah.is_spotify_track_uri(uri):
+            start_time = time.perf_counter()
+            show_spinner = not args.verbose and not args.quiet
+            if show_spinner:
+                console = Console()
+                with console.status("Ripping track..."):
+                    result = mr.rip_track(uri, download_directory=None)
+            else:
+                result = mr.rip_track(uri, download_directory=None)
+
+            end_time = time.perf_counter()
+            logger.info(
+                f"Ripped {1 if result.success else 0}/1 tracks in {end_time - start_time:,.2f} seconds"
+            )
+            if result.success:
+                logger.info(f"Track saved to {result.path}")
+            results = [result]
+        else:
+            logger.error(f"Invalid Spotify URI: {uri}")
+            logger.error("URI must be a Spotify playlist or track")
+            parser.error(f"Invalid Spotify URI: {uri}")
 
     failures = [result for result in results if not result.success]
     if failures:

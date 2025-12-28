@@ -29,6 +29,7 @@ with warnings.catch_warnings(action="ignore", category=SyntaxWarning):
 
 SPOTIFY_CDN_URL = "https://i.scdn.co/image/"
 SPOTIFY_PLAYLIST_REGEX = re.compile(r"^spotify:playlist:[A-Za-z0-9]{22}$")
+SPOTIFY_TRACK_REGEX = re.compile(r"^spotify:track:[A-Za-z0-9]{22}$")
 
 logger = logging.getLogger(__name__)
 
@@ -45,10 +46,6 @@ class RipFailedError(Exception):
         self.uri = uri
         self.title = title
         self.original_error = original_error
-
-
-def is_spotify_playlist_uri(playlist_uri: str) -> bool:
-    return bool(SPOTIFY_PLAYLIST_REGEX.match(playlist_uri))
 
 
 def make_unique_directory(path: Path):
@@ -72,6 +69,7 @@ class TrackRipResult:
     title: str | None
     success: bool = True
     failure_reason: str | None = None
+    path: Path | None = None
 
 
 class MrRippah:
@@ -160,6 +158,30 @@ class MrRippah:
                 type_, item_id = match.groups()
                 return f"spotify:{type_}:{item_id}"
         return url
+
+    @staticmethod
+    def is_spotify_playlist_uri(playlist_uri: str) -> bool:
+        """Check if string is a valid Spotify playlist URI.
+
+        Args:
+            playlist_uri: String to validate as Spotify playlist URI.
+
+        Returns:
+            True if valid Spotify playlist URI format, False otherwise.
+        """
+        return bool(SPOTIFY_PLAYLIST_REGEX.match(playlist_uri))
+
+    @staticmethod
+    def is_spotify_track_uri(track_uri: str) -> bool:
+        """Check if string is a valid Spotify track URI.
+
+        Args:
+            track_uri: String to validate as Spotify track URI.
+
+        Returns:
+            True if valid Spotify track URI format, False otherwise.
+        """
+        return bool(SPOTIFY_TRACK_REGEX.match(track_uri))
 
     def connect(self) -> Self:
         """Start Spotify session with OAuth authentication.
@@ -270,7 +292,7 @@ class MrRippah:
 
         playlist_uri = self.spotify_url_to_uri(playlist_uri)
 
-        if not is_spotify_playlist_uri(playlist_uri):
+        if not self.is_spotify_playlist_uri(playlist_uri):
             raise ValueError(f"Invalid Spotify playlist URI: {playlist_uri}")
 
         if download_directory is None:
@@ -483,4 +505,4 @@ class MrRippah:
 
         audio.save()
 
-        return TrackRipResult(uri=track_uri, title=metadata.name)
+        return TrackRipResult(uri=track_uri, title=metadata.name, path=track_path)

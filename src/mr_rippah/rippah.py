@@ -5,6 +5,7 @@ import warnings
 import webbrowser
 from io import BytesIO
 from pathlib import Path
+from typing import Self
 
 import requests
 from librespot.audio.decoders import AudioQuality, VorbisOnlyAudioQuality
@@ -60,7 +61,7 @@ def make_unique_directory(path: Path):
 
 
 class MrRippah:
-    def __init__(self, log_level=logging.INFO):
+    def __init__(self, log_level=logging.INFO, clear_spotify_credentials: bool = False):
         # Configure logger
         self.log_level = log_level
         self.logger = logging.getLogger(f"mr_rippah_{id(self)}")
@@ -79,15 +80,20 @@ class MrRippah:
         if log_level == logging.DEBUG:
             self.logger.debug("Log level set to debug")
 
-    def start_session(self, clear_existing_credentials: bool = False) -> None:
-        librespot_config = Session.Configuration.Builder().set_stored_credential_file(
-            CREDENTIALS_FILE
-        )
-        session_builder = Session.Builder(librespot_config)
+        if clear_spotify_credentials:
+            self.clear_credentials()
 
-        if clear_existing_credentials:
-            self.logger.info("Clearing existing Spotify credentials")
-            CREDENTIALS_FILE.unlink(missing_ok=True)
+    def clear_credentials(self) -> None:
+        """Delete saved Spotify credentials."""
+        self.logger.info("Clearing existing Spotify credentials")
+        CREDENTIALS_FILE.unlink(missing_ok=True)
+
+    def connect(self) -> Self:
+        """Start Spotify session."""
+        config_builder = Session.Configuration.Builder()
+        config_builder.set_stored_credential_file(CREDENTIALS_FILE)
+        librespot_config = config_builder.build()
+        session_builder = Session.Builder(librespot_config)
 
         self.logger.info("Connecting to Spotify")
         success_page = (
@@ -116,6 +122,23 @@ class MrRippah:
             else:
                 self._api = self._session.api()
                 break
+
+        return self
+
+    def close(self) -> None:
+        """Close Spotify session."""
+        try:
+            self._session.close()
+        except AttributeError:
+            pass
+        self._session = None
+        self._api = None
+
+    def __enter__(self) -> Self:
+        return self.connect()
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        self.close()
 
     def rip_playlist(self, playlist_uri: str) -> None:
         if playlist_uri.startswith(("http://", "https://")):

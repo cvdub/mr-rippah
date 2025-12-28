@@ -13,9 +13,9 @@ def main():
     )
     parser.add_argument(
         "-c",
-        "--clear-existing-credentials",
+        "--clear-spotify-credentials",
         action="store_true",
-        help="clear existing credentials",
+        help="clear existing Spotify credentials",
     )
     verbosity_group = parser.add_mutually_exclusive_group()
     verbosity_group.add_argument(
@@ -40,13 +40,10 @@ def main():
     else:
         log_level = logging.INFO
 
-    mr = MrRippah(log_level=log_level)
-    mr.start_session(clear_existing_credentials=args.clear_existing_credentials)
-    try:
+    with MrRippah(
+        log_level=log_level, clear_spotify_credentials=args.clear_spotify_credentials
+    ) as mr:
         mr.rip_playlist(args.uri)
-    except Exception as e:
-        mr.logger.error(str(e))
-        raise SystemExit(1)
 
     end_time = time.perf_counter()
     mr.logger.info(f"Ripped playlist in {end_time - start_time:,.2f} seconds")

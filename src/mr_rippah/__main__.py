@@ -1,6 +1,7 @@
 import argparse
 import logging
 import time
+from pathlib import Path
 
 from mr_rippah import MrRippah
 from rich import box
@@ -13,7 +14,17 @@ def main():
     parser = argparse.ArgumentParser(description="Mr. Rippah")
     parser.add_argument(
         "uri",
-        help="spotify playlist or track URI",
+        help="Spotify playlist or track URI",
+    )
+    parser.add_argument(
+        "--credentials-path",
+        type=Path,
+        help="path to Spotify credentials file",
+    )
+    parser.add_argument(
+        "--download-directory",
+        type=Path,
+        help="directory to save downloaded tracks",
     )
     parser.add_argument(
         "-c",
@@ -67,9 +78,13 @@ def main():
 
     if args.clear_spotify_credentials:
         logger.info("Clearing existing Spotify credentials")
-        MrRippah.default_credentials_path().unlink(missing_ok=True)
+        credentials_path = args.credentials_path or MrRippah.default_credentials_path()
+        credentials_path.unlink(missing_ok=True)
 
-    with MrRippah() as mr:
+    with MrRippah(
+        credentials_path=args.credentials_path,
+        download_directory=args.download_directory,
+    ) as mr:
         # Normalize URL to URI and detect type
         uri = MrRippah.spotify_url_to_uri(args.uri)
 

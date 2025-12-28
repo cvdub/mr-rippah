@@ -1,6 +1,5 @@
 import argparse
 import logging
-import time
 
 from mr_rippah import MrRippah
 from rich import box
@@ -36,7 +35,6 @@ def main():
 
     # Set the log level
     args = parser.parse_args()
-    start_time = time.perf_counter()
     if args.verbose:
         log_level = logging.DEBUG
     elif args.quiet:
@@ -60,15 +58,17 @@ def main():
     )
 
     # Only set application logger to user-specified level
-    app_logger = logging.getLogger("mr_rippah")
-    app_logger.setLevel(log_level)
-
-    logger = logging.getLogger(__name__)
+    logger = logging.getLogger("mr_rippah")
+    logger.setLevel(log_level)
 
     if log_level == logging.DEBUG:
         logger.debug("Log level set to debug")
 
-    with MrRippah(clear_spotify_credentials=args.clear_spotify_credentials) as mr:
+    if args.clear_spotify_credentials:
+        logger.info("Clearing existing Spotify credentials")
+        MrRippah.default_credentials_path().unlink(missing_ok=True)
+
+    with MrRippah() as mr:
         results = mr.rip_playlist(args.uri)
 
     failures = [result for result in results if not result.success]
@@ -93,9 +93,6 @@ def main():
             )
 
         console.print(table)
-
-    end_time = time.perf_counter()
-    logger.info(f"Ripped playlist in {end_time - start_time:,.2f} seconds")
 
 
 if __name__ == "__main__":

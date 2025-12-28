@@ -4,6 +4,7 @@ import time
 from pathlib import Path
 
 from mr_rippah import MrRippah
+from mr_rippah.update_checker import check_for_update
 from rich import box
 from rich.console import Console
 from rich.logging import RichHandler
@@ -42,8 +43,21 @@ def main():
         action="store_true",
         help="suppress logging output",
     )
+    parser.add_argument(
+        "--no-update-check",
+        action="store_true",
+        help="disable automatic update checking",
+    )
 
     args = parser.parse_args()
+
+    # Check for updates before logging is configured
+    update_available = None
+    if not args.no_update_check:
+        try:
+            update_available = check_for_update()
+        except Exception:
+            pass  # Silently ignore any errors
 
     # Set the log level
     args = parser.parse_args()
@@ -75,6 +89,18 @@ def main():
 
     if log_level == logging.DEBUG:
         logger.debug("Log level set to debug")
+
+    # Display update notification if available and not in quiet mode
+    if update_available and log_level != logging.ERROR:
+        current_ver, latest_ver = update_available
+        console = Console()
+        console.print(
+            f"[yellow]Update available: mr-rippah {current_ver} → {latest_ver}[/yellow]"
+        )
+        console.print(
+            "[yellow]Run: uv tool install --upgrade 'git+https://github.com/cvdub/mr-rippah'[/yellow]"
+        )
+        console.print()  # Blank line for spacing
 
     if args.clear_spotify_credentials:
         logger.info("Clearing existing Spotify credentials")

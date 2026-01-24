@@ -149,7 +149,7 @@ def main():
             title_justify="left",
             box=box.SIMPLE,
         )
-        reason_width = max(len(result.failure_reason) for result in failures)
+        reason_width = max(len(result.failure_reason or "") for result in failures)
         table.add_column("Reason", no_wrap=True, min_width=reason_width, style="yellow")
         table.add_column("Title", no_wrap=True)
         table.add_column("URI", no_wrap=True, min_width=36)

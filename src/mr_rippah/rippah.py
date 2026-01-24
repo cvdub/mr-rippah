@@ -4,6 +4,7 @@ import sys
 import time
 import warnings
 import webbrowser
+from collections.abc import Callable
 from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path
@@ -41,7 +42,7 @@ class RipFailedError(Exception):
         message: str,
         uri: str,
         title: str | None = None,
-        original_error: Exception = None,
+        original_error: Exception | None = None,
     ):
         super().__init__(message)
         self.uri = uri
@@ -115,7 +116,7 @@ class MrRippah:
     track_download_retries: int
     retry_delay_seconds: int
     successful_download_delay_seconds: int
-    spotify_oauth_callback: callable
+    spotify_oauth_callback: Callable[[str], None]
 
     def __init__(
         self,
@@ -126,7 +127,7 @@ class MrRippah:
         track_download_retries: int = 5,
         retry_delay_seconds: int = 5,
         successful_download_delay_seconds: int = 5,
-        spotify_oauth_callback: callable = spotify_oauth_callback,
+        spotify_oauth_callback: Callable[[str], None] = spotify_oauth_callback,
     ):
         """Initialize Mr. Rippah with configuration options.
 
@@ -153,6 +154,40 @@ class MrRippah:
         self.retry_delay_seconds = retry_delay_seconds
         self.successful_download_delay_seconds = successful_download_delay_seconds
         self.spotify_oauth_callback = spotify_oauth_callback
+        self.__session: Session | None = None
+        self.__api = None
+
+    @property
+    def _session(self) -> Session:
+        """Get the active Spotify session.
+
+        Returns:
+            The active Session object.
+
+        Raises:
+            RuntimeError: If connect() has not been called or the session is closed.
+        """
+        if self.__session is None:
+            raise RuntimeError(
+                "Not connected to Spotify. Call connect() or use as a context manager."
+            )
+        return self.__session
+
+    @property
+    def _api(self):
+        """Get the active Spotify API client.
+
+        Returns:
+            The active API client object.
+
+        Raises:
+            RuntimeError: If connect() has not been called or the session is closed.
+        """
+        if self.__api is None:
+            raise RuntimeError(
+                "Not connected to Spotify. Call connect() or use as a context manager."
+            )
+        return self.__api
 
     @staticmethod
     def default_credentials_path() -> Path:
@@ -222,7 +257,7 @@ class MrRippah:
             RuntimeError: If session creation fails after all retry attempts.
         """
         config_builder = Session.Configuration.Builder()
-        config_builder.set_stored_credential_file(self.credentials_path)
+        config_builder.set_stored_credential_file(str(self.credentials_path))
         librespot_config = config_builder.build()
         session_builder = Session.Builder(librespot_config)
 
@@ -237,7 +272,7 @@ class MrRippah:
         num_retries = 0
         while num_retries < self.spotify_authentication_retries:
             try:
-                self._session = session_builder.oauth(
+                self.__session = session_builder.oauth(
                     self.spotify_oauth_callback, success_page
                 ).create()
             except (RuntimeError, ConnectionRefusedError) as e:
@@ -249,7 +284,7 @@ class MrRippah:
                     time.sleep(wait_time)
                     logger.debug(f"Retry attempt {num_retries} for librespot session")
             else:
-                self._api = self._session.api()
+                self.__api = self.__session.api()
                 break
 
         logger.debug("Successfully connected to Spotify")
@@ -260,14 +295,15 @@ class MrRippah:
 
         Safely closes the connection even if session was never established.
         """
-        try:
-            self._session.close()
-            logger.debug("Closed Spotify connection")
-        except AttributeError:
-            logger.debug("Spotify connection already closed")
-            pass
-        self._session = None
-        self._api = None
+        if self.__session is not None:
+            try:
+                self.__session.close()
+                logger.debug("Closed Spotify connection")
+            except AttributeError:
+                logger.debug("Spotify connection already closed")
+                pass
+            self.__session = None
+            self.__api = None
 
     def __enter__(self) -> Self:
         """Enter context manager and establish Spotify connection.

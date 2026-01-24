@@ -13,6 +13,7 @@ import requests
 from librespot.audio.decoders import AudioQuality, VorbisOnlyAudioQuality
 from librespot.core import Session
 from librespot.metadata import PlaylistId, TrackId
+from librespot.proto import Playlist4External_pb2 as Playlist4
 from mutagen.easyid3 import EasyID3
 from mutagen.id3 import APIC, COMM, ID3, TXXX
 from platformdirs import user_cache_dir, user_downloads_dir
@@ -272,6 +273,64 @@ class MrRippah:
         """
         self.close()
 
+    def get_username(self) -> str:
+        """Get the username of the currently authenticated Spotify user.
+
+        Returns:
+            The Spotify username.
+        """
+        return self._session.username()
+
+    def get_current_user_playlists(self) -> list[str]:
+        """Get all playlist URIs for the currently authenticated user.
+
+        Returns:
+            List of Spotify playlist URIs (e.g., "spotify:playlist:...") owned by
+            or followed by the current user.
+
+        Raises:
+            Exception: If the API request to fetch the user's playlists fails.
+        """
+        username = self._session.username()
+        logger.debug(f"Getting Spotify playlists for {username=}")
+        response = self._api.send(
+            "GET", f"/playlist/v2/user/{username}/rootlist", None, None
+        )
+        if response.status_code != 200:
+            raise Exception(f"Failed to fetch rootlist: {response.status_code}")
+
+        root_list = Playlist4.SelectedListContent()
+        root_list.ParseFromString(response.content)
+
+        playlist_uris = []
+        for item in root_list.contents.items:
+            playlist_uri = item.uri
+            if playlist_uri.startswith("spotify:playlist:"):
+                playlist_uris.append(playlist_uri)
+
+        return playlist_uris
+
+    def get_playlist_tracks(self, playlist_uri: str) -> list[str]:
+        """Get all track URIs from a Spotify playlist.
+
+        Args:
+            playlist_uri: Spotify playlist URI (spotify:playlist:ID) or full URL
+                (https://open.spotify.com/playlist/ID).
+
+        Returns:
+            List of track URIs (e.g., "spotify:track:...") contained in the playlist.
+
+        Raises:
+            ValueError: If playlist_uri is not a valid Spotify playlist URI or URL.
+        """
+        playlist_uri = self.spotify_url_to_uri(playlist_uri)
+        if not self.is_spotify_playlist_uri(playlist_uri):
+            raise ValueError(f"Invalid Spotify playlist URI: {playlist_uri}")
+
+        playlist_id = PlaylistId.from_uri(playlist_uri)
+        playlist = self._api.get_playlist(playlist_id)
+        return [item.uri for item in playlist.contents.items]
+
     def rip_playlist(
         self,
         playlist_uri: str,
@@ -300,19 +359,15 @@ class MrRippah:
         """
         start_time = time.perf_counter()
 
-        playlist_uri = self.spotify_url_to_uri(playlist_uri)
-
-        if not self.is_spotify_playlist_uri(playlist_uri):
-            raise ValueError(f"Invalid Spotify playlist URI: {playlist_uri}")
-
         if download_directory is None:
             download_directory = self.download_directory
 
+        track_uris = self.get_playlist_tracks(playlist_uri)
+
+        playlist_uri = self.spotify_url_to_uri(playlist_uri)
         playlist_download_directory = make_unique_directory(
             download_directory / playlist_uri.split(":")[-1]
         )
-        playlist_id = PlaylistId.from_uri(playlist_uri)
-        playlist = self._api.get_playlist(playlist_id)
         results = []
 
         # Disable progress bar in verbose/debug mode or non-terminal outputs
@@ -330,13 +385,12 @@ class MrRippah:
             disable=not show_progress,
             transient=True,
         ) as progress:
-            task = progress.add_task("Ripping!", total=playlist.length)
-            for track_num, item in enumerate(playlist.contents.items, start=1):
-                logger.debug(
-                    f"{item.uri} Ripping track {track_num:,}/{playlist.length:,}"
-                )
+            num_tracks = len(track_uris)
+            task = progress.add_task("Ripping!", total=num_tracks)
+            for track_num, track_uri in enumerate(track_uris, start=1):
+                logger.debug(f"{track_uri} Ripping track {track_num:,}/{num_tracks:,}")
                 try:
-                    result = self.rip_track(item.uri, playlist_download_directory)
+                    result = self.rip_track(track_uri, playlist_download_directory)
                 except RipFailedError as e:
                     logger.debug(f"{e.uri} {e}")
                     result = TrackRipResult(
@@ -348,7 +402,7 @@ class MrRippah:
                 else:
                     if (
                         self.successful_download_delay_seconds > 0
-                        and track_num != playlist.length
+                        and track_num != num_tracks
                     ):
                         logger.debug(
                             f"Waiting {self.successful_download_delay_seconds} seconds to start next download"
@@ -360,7 +414,7 @@ class MrRippah:
         num_successes = sum(1 for r in results if r.success)
         end_time = time.perf_counter()
         logger.info(
-            f"Ripped {num_successes:,}/{playlist.length:,} tracks in {end_time - start_time:,.2f} seconds"
+            f"Ripped {num_successes:,}/{num_tracks:,} tracks in {end_time - start_time:,.2f} seconds"
         )
         logger.info(f"Playlist saved to {playlist_download_directory}")
         return results

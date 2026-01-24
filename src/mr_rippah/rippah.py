@@ -226,7 +226,7 @@ class MrRippah:
         librespot_config = config_builder.build()
         session_builder = Session.Builder(librespot_config)
 
-        logger.debug("Connecting to Spotify")
+        logger.info("Connecting to Spotify")
         success_page = (
             "<html><body>"
             "<h1>Login Successful</h1>"

@@ -50,6 +50,15 @@ class RipFailedError(Exception):
 
 
 def make_unique_directory(path: Path):
+    """Create a directory with a unique name, appending a number if it already exists.
+
+    Args:
+        path: The desired directory path.
+
+    Returns:
+        Path to the created directory. If the path exists, returns a path with
+        a number appended (e.g., "dirname (1)", "dirname (2)").
+    """
     if not path.exists():
         path.mkdir()
         return path
@@ -74,6 +83,11 @@ class TrackRipResult:
 
 
 def spotify_oauth_callback(url: str) -> None:
+    """Default OAuth callback that opens the authentication URL in a web browser.
+
+    Args:
+        url: The Spotify OAuth authentication URL to open.
+    """
     webbrowser.open(url)
 
 

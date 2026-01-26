@@ -5,7 +5,7 @@ import time
 import warnings
 import webbrowser
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from io import BytesIO
 from pathlib import Path
 from typing import Self
@@ -30,8 +30,12 @@ with warnings.catch_warnings(action="ignore", category=SyntaxWarning):
     from pydub import AudioSegment
 
 SPOTIFY_CDN_URL = "https://i.scdn.co/image/"
-SPOTIFY_PLAYLIST_REGEX = re.compile(r"^spotify:playlist:[A-Za-z0-9]{22}$")
-SPOTIFY_TRACK_REGEX = re.compile(r"^spotify:track:[A-Za-z0-9]{22}$")
+SPOTIFY_PLAYLIST_URI_REGEX = re.compile(r"^spotify:playlist:[A-Za-z0-9]{22}$")
+SPOTIFY_TRACK_URI_REGEX = re.compile(r"^spotify:track:[A-Za-z0-9]{22}$")
+
+type SpotifyPlaylistURI = str
+type SpotifyTrackURI = str
+
 
 logger = logging.getLogger(__name__)
 
@@ -72,6 +76,13 @@ def make_unique_directory(path: Path):
             candidate.mkdir()
             return candidate
         i += 1
+
+
+@dataclass
+class SpotifyPlaylist:
+    name: str
+    uri: SpotifyPlaylistURI
+    track_uris: list[SpotifyTrackURI] = field(default_factory=list, repr=False)
 
 
 @dataclass
@@ -229,7 +240,7 @@ class MrRippah:
         Returns:
             True if valid Spotify playlist URI format, False otherwise.
         """
-        return bool(SPOTIFY_PLAYLIST_REGEX.match(playlist_uri))
+        return bool(SPOTIFY_PLAYLIST_URI_REGEX.match(playlist_uri))
 
     @staticmethod
     def is_spotify_track_uri(track_uri: str) -> bool:
@@ -241,7 +252,7 @@ class MrRippah:
         Returns:
             True if valid Spotify track URI format, False otherwise.
         """
-        return bool(SPOTIFY_TRACK_REGEX.match(track_uri))
+        return bool(SPOTIFY_TRACK_URI_REGEX.match(track_uri))
 
     def connect(self) -> Self:
         """Start Spotify session with OAuth authentication.
@@ -331,7 +342,7 @@ class MrRippah:
         """
         return self._session.username()
 
-    def get_current_user_playlists(self) -> list[str]:
+    def get_current_user_playlists(self) -> list[SpotifyPlaylistURI]:
         """Get all playlist URIs for the currently authenticated user.
 
         Returns:
@@ -360,7 +371,7 @@ class MrRippah:
 
         return playlist_uris
 
-    def get_playlist_tracks(self, playlist_uri: str) -> list[str]:
+    def get_playlist_tracks(self, playlist_uri: SpotifyPlaylistURI) -> SpotifyPlaylist:
         """Get all track URIs from a Spotify playlist.
 
         Args:
@@ -378,8 +389,12 @@ class MrRippah:
             raise ValueError(f"Invalid Spotify playlist URI: {playlist_uri}")
 
         playlist_id = PlaylistId.from_uri(playlist_uri)
-        playlist = self._api.get_playlist(playlist_id)
-        return [item.uri for item in playlist.contents.items]
+        librespot_playlist = self._api.get_playlist(playlist_id)
+        return SpotifyPlaylist(
+            name=librespot_playlist.attributes.name,
+            uri=playlist_uri,
+            track_uris=[item.uri for item in librespot_playlist.contents.items],
+        )
 
     def rip_playlist(
         self,
@@ -412,11 +427,9 @@ class MrRippah:
         if download_directory is None:
             download_directory = self.download_directory
 
-        track_uris = self.get_playlist_tracks(playlist_uri)
-
-        playlist_uri = self.spotify_url_to_uri(playlist_uri)
+        playlist = self.get_playlist_tracks(playlist_uri)
         playlist_download_directory = make_unique_directory(
-            download_directory / playlist_uri.split(":")[-1]
+            download_directory / playlist.uri.split(":")[-1]
         )
         results = []
 
@@ -435,9 +448,9 @@ class MrRippah:
             disable=not show_progress,
             transient=True,
         ) as progress:
-            num_tracks = len(track_uris)
+            num_tracks = len(playlist.track_uris)
             task = progress.add_task("Ripping!", total=num_tracks)
-            for track_num, track_uri in enumerate(track_uris, start=1):
+            for track_num, track_uri in enumerate(playlist.track_uris, start=1):
                 logger.debug(f"{track_uri} Ripping track {track_num:,}/{num_tracks:,}")
                 try:
                     result = self.rip_track(track_uri, playlist_download_directory)

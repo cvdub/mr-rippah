@@ -1,3 +1,4 @@
+import base64
 import logging
 import re
 import sys
@@ -82,6 +83,7 @@ def make_unique_directory(path: Path):
 class SpotifyPlaylist:
     name: str
     uri: SpotifyPlaylistURI
+    snapshot_id: str
     track_uris: list[SpotifyTrackURI] = field(default_factory=list, repr=False)
 
 
@@ -393,6 +395,7 @@ class MrRippah:
         return SpotifyPlaylist(
             name=librespot_playlist.attributes.name,
             uri=playlist_uri,
+            snapshot_id=base64.b64encode(librespot_playlist.revision).decode("utf-8"),
             track_uris=[item.uri for item in librespot_playlist.contents.items],
         )
 
